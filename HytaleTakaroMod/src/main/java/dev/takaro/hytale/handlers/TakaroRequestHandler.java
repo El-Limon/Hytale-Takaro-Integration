@@ -23,6 +23,7 @@ import dev.takaro.hytale.TakaroPlugin;
 import dev.takaro.hytale.api.HytaleApiClient;
 import static dev.takaro.hytale.util.Responses.commandResult;
 import static dev.takaro.hytale.util.Responses.commandName;
+import dev.takaro.hytale.util.TakaroArgs;
 
 import java.io.IOException;
 import java.util.*;
@@ -187,25 +188,9 @@ public class TakaroRequestHandler {
 
     private Object handleGetPlayer(JsonObject payload) {
         try {
-            // Parse args to get player identifier
-            String gameId = null;
-            String playerName = null;
-
-            if (payload.has("args")) {
-                String argsString = payload.get("args").getAsString();
-                JsonObject args = gson.fromJson(argsString, JsonObject.class);
-                if (args.has("gameId")) {
-                    gameId = args.get("gameId").getAsString();
-                } else if (args.has("name")) {
-                    playerName = args.get("name").getAsString();
-                }
-            } else if (payload.has("gameId")) {
-                gameId = payload.get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                gameId = payload.get("playerId").getAsString();
-            } else if (payload.has("name")) {
-                playerName = payload.get("name").getAsString();
-            }
+            TakaroArgs args = TakaroArgs.of(payload);
+            String gameId = args.playerGameId();
+            String playerName = gameId == null ? args.playerName() : null;
 
             if (gameId == null && playerName == null) {
                 Map<String, Object> error = new HashMap<>();
@@ -287,26 +272,16 @@ public class TakaroRequestHandler {
     private Object handleSendMessage(JsonObject payload) {
         try {
             // Parse args if it exists, otherwise try direct message field
-            String message;
-            String recipientGameId = null;
+            TakaroArgs args = TakaroArgs.of(payload);
+            String message = args.str("message");
+            // An explicitly-null opts / recipient (what modules send) must not throw.
+            String recipientGameId = args.recipientGameId();
 
-            if (payload.has("args")) {
-                String argsString = payload.get("args").getAsString();
-                JsonObject args = gson.fromJson(argsString, JsonObject.class);
-                message = args.get("message").getAsString();
-
-                // Check for opts.recipient.gameId for private messages
-                if (args.has("opts")) {
-                    JsonObject opts = args.getAsJsonObject("opts");
-                    if (opts.has("recipient")) {
-                        JsonObject recipient = opts.getAsJsonObject("recipient");
-                        if (recipient.has("gameId")) {
-                            recipientGameId = recipient.get("gameId").getAsString();
-                        }
-                    }
-                }
-            } else {
-                message = payload.get("message").getAsString();
+            if (message == null) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", false);
+                result.put("error", "No message provided");
+                return result;
             }
 
             com.hypixel.hytale.server.core.universe.Universe universe =
@@ -372,11 +347,15 @@ public class TakaroRequestHandler {
     private Object handleSetPlayerNameColor(JsonObject payload) {
         try {
             // Parse args: {"uuid": "player-uuid", "color": "gold"}
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
+            TakaroArgs args = TakaroArgs.of(payload);
+            String uuid = args.str("uuid", args.playerGameId());
+            String color = args.nonBlank("color", null);
 
-            String uuid = args.get("uuid").getAsString();
-            String color = args.has("color") ? args.get("color").getAsString() : null;
+            if (uuid == null) {
+                Map<String, Boolean> result = new HashMap<>();
+                result.put("success", false);
+                return result;
+            }
 
             plugin.getLogger().at(java.util.logging.Level.INFO).log(
                 "Setting name color for player " + uuid + ": " + color
@@ -401,9 +380,7 @@ public class TakaroRequestHandler {
         String command;
         try {
             // The payload structure is: {"args": "{\"command\":\"help\"}"}
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
-            command = args.get("command").getAsString().trim();
+            command = TakaroArgs.of(payload).str("command", "").trim();
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error parsing executeConsoleCommand payload: " + e.getMessage());
             return commandResult(false, "Error: could not read command from payload: " + e.getMessage());
@@ -574,28 +551,32 @@ public class TakaroRequestHandler {
 
     private Object handleGiveItem(JsonObject payload) {
         try {
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
+            TakaroArgs args = TakaroArgs.of(payload);
 
-            // Try to get gameId from args first, then fall back to top-level payload
-            String gameId;
-            if (args.has("gameId")) {
-                gameId = args.get("gameId").getAsString();
-            } else if (args.has("player") && args.get("player").isJsonObject() && args.getAsJsonObject("player").has("gameId")) {
-                gameId = args.getAsJsonObject("player").get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                gameId = payload.get("playerId").getAsString();
-            } else if (payload.has("gameId")) {
-                gameId = payload.get("gameId").getAsString();
-            } else {
+            String gameId = args.playerGameId();
+            if (gameId == null) {
+                gameId = args.playerName();
+            }
+            if (gameId == null) {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
                 result.put("error", "No gameId or playerId provided");
                 return result;
             }
 
-            String itemId = args.get("item").getAsString();
-            int amount = args.has("amount") ? args.get("amount").getAsInt() : 1;
+            String itemId = args.str("item", args.str("itemId", null));
+            if (itemId == null) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", false);
+                result.put("error", "No item provided");
+                return result;
+            }
+            // Explicit JSON null / a string amount must not throw, and must not silently become 1.
+            int amount = Math.max(1, args.intVal("amount", 1));
+            // 'quality' is part of Takaro's giveItem signature. Hytale 0.6.8's ItemStack has no
+            // quality/variant concept the connector can set, so it is accepted and reported back
+            // rather than silently dropped.
+            String quality = args.nonBlank("quality", null);
 
             plugin.getLogger().at(java.util.logging.Level.INFO).log("Giving item " + itemId + " x" + amount + " to player " + gameId);
 
@@ -678,6 +659,12 @@ public class TakaroRequestHandler {
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", success);
+            if (!success) {
+                result.put("error", "Item could not be added (unknown item id, or inventory full)");
+            }
+            if (quality != null) {
+                result.put("qualityIgnored", quality);
+            }
             plugin.getLogger().at(java.util.logging.Level.INFO).log("Give item result: " + success);
             return result;
         } catch (Exception e) {
@@ -692,27 +679,18 @@ public class TakaroRequestHandler {
 
     private Object handleKickPlayer(JsonObject payload) {
         try {
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
+            TakaroArgs args = TakaroArgs.of(payload);
 
-            // Try to get gameId from args first, then fall back to top-level payload
-            String gameId;
-            if (args.has("gameId")) {
-                gameId = args.get("gameId").getAsString();
-            } else if (args.has("player") && args.get("player").isJsonObject() && args.getAsJsonObject("player").has("gameId")) {
-                gameId = args.getAsJsonObject("player").get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                gameId = payload.get("playerId").getAsString();
-            } else if (payload.has("gameId")) {
-                gameId = payload.get("gameId").getAsString();
-            } else {
+            String gameId = args.playerGameId();
+            if (gameId == null) {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
                 result.put("error", "No gameId or playerId provided");
                 return result;
             }
 
-            String reason = args.has("reason") ? args.get("reason").getAsString() : "You were kicked.";
+            // Modules send an explicit JSON null (or "") for an unset reason.
+            String reason = args.nonBlank("reason", "You were kicked.");
 
             plugin.getLogger().at(java.util.logging.Level.INFO).log("Kicking player: " + gameId);
 
@@ -773,18 +751,9 @@ public class TakaroRequestHandler {
 
     private Object handleGetPlayerLocation(JsonObject payload) {
         try {
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
-
-            // Try to get gameId from args first, then fall back to top-level payload
-            String gameId;
-            if (args.has("gameId")) {
-                gameId = args.get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                gameId = payload.get("playerId").getAsString();
-            } else if (payload.has("gameId")) {
-                gameId = payload.get("gameId").getAsString();
-            } else {
+            TakaroArgs args = TakaroArgs.of(payload);
+            String gameId = args.playerGameId();
+            if (gameId == null) {
                 Map<String, Object> result = new HashMap<>();
                 result.put("x", 0);
                 result.put("y", 0);
@@ -878,31 +847,18 @@ public class TakaroRequestHandler {
 
     private Object handleTeleportPlayerToPlayer(JsonObject payload) {
         try {
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
+            TakaroArgs args = TakaroArgs.of(payload);
 
-            // Try to get gameId from args first, then fall back to top-level payload
-            String sourceGameId;
-            if (args.has("gameId")) {
-                sourceGameId = args.get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                sourceGameId = payload.get("playerId").getAsString();
-            } else if (payload.has("gameId")) {
-                sourceGameId = payload.get("gameId").getAsString();
-            } else {
+            String sourceGameId = args.playerGameId();
+            if (sourceGameId == null) {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
                 result.put("error", "No gameId or playerId provided for source player");
                 return result;
             }
 
-            // Get target gameId from args
-            String targetGameId;
-            if (args.has("targetGameId")) {
-                targetGameId = args.get("targetGameId").getAsString();
-            } else if (args.has("targetPlayerId")) {
-                targetGameId = args.get("targetPlayerId").getAsString();
-            } else {
+            String targetGameId = args.targetGameId();
+            if (targetGameId == null) {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
                 result.put("error", "No targetGameId or targetPlayerId provided");
@@ -1035,29 +991,25 @@ public class TakaroRequestHandler {
 
     private Object handleTeleportPlayer(JsonObject payload) {
         try {
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
+            TakaroArgs args = TakaroArgs.of(payload);
 
-            // Try to get gameId from args first, then fall back to top-level payload
-            String gameId;
-            if (args.has("gameId")) {
-                gameId = args.get("gameId").getAsString();
-            } else if (args.has("player") && args.get("player").isJsonObject() && args.getAsJsonObject("player").has("gameId")) {
-                gameId = args.getAsJsonObject("player").get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                gameId = payload.get("playerId").getAsString();
-            } else if (payload.has("gameId")) {
-                gameId = payload.get("gameId").getAsString();
-            } else {
+            String gameId = args.playerGameId();
+            if (gameId == null) {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
                 result.put("error", "No gameId or playerId provided");
                 return result;
             }
 
-            double x = args.get("x").getAsDouble();
-            double y = args.get("y").getAsDouble();
-            double z = args.get("z").getAsDouble();
+            if (!args.hasNumber("x") || !args.hasNumber("y") || !args.hasNumber("z")) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", false);
+                result.put("error", "teleportPlayer needs numeric x, y and z");
+                return result;
+            }
+            double x = args.dblVal("x", 0);
+            double y = args.dblVal("y", 0);
+            double z = args.dblVal("z", 0);
 
             plugin.getLogger().at(java.util.logging.Level.INFO).log("Teleporting player " + gameId + " to " + x + "," + y + "," + z);
 
@@ -1205,18 +1157,9 @@ public class TakaroRequestHandler {
 
     private Object handleGetPlayerInventory(JsonObject payload) {
         try {
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
-
-            // Try to get gameId from args first, then fall back to top-level payload
-            String gameId;
-            if (args.has("gameId")) {
-                gameId = args.get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                gameId = payload.get("playerId").getAsString();
-            } else if (payload.has("gameId")) {
-                gameId = payload.get("gameId").getAsString();
-            } else {
+            TakaroArgs args = TakaroArgs.of(payload);
+            String gameId = args.playerGameId();
+            if (gameId == null) {
                 plugin.getLogger().at(java.util.logging.Level.WARNING).log("No gameId or playerId provided");
                 return new Object[0];
             }
@@ -1340,18 +1283,9 @@ public class TakaroRequestHandler {
 
     private Object handleGetPlayerBedLocation(JsonObject payload) {
         try {
-            String argsString = payload.get("args").getAsString();
-            JsonObject args = gson.fromJson(argsString, JsonObject.class);
-
-            // Try to get gameId from args first, then fall back to top-level payload
-            String gameId;
-            if (args.has("gameId")) {
-                gameId = args.get("gameId").getAsString();
-            } else if (payload.has("playerId")) {
-                gameId = payload.get("playerId").getAsString();
-            } else if (payload.has("gameId")) {
-                gameId = payload.get("gameId").getAsString();
-            } else {
+            TakaroArgs args = TakaroArgs.of(payload);
+            String gameId = args.playerGameId();
+            if (gameId == null) {
                 plugin.getLogger().at(java.util.logging.Level.WARNING).log("No gameId or playerId provided");
                 return new Object[0];
             }
