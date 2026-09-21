@@ -4,6 +4,18 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
+## 1.14.6-elimon.3
+
+### Moderation
+- **F16** - `listBans` sent `player.name: null` for a ban whose target is not in the
+  `known-players.json` ledger (any ban issued by UUID, and every ban that predates the ledger).
+  Takaro validates `BanDTO.player.name` with `isString` and rejected the **entire** response:
+  `gameserverListBans` answered HTTP 400 "The gameserver responded with bad data, please verify
+  that the mod is up to date" while the ban was correctly stored in Hytale's `bans.json`.
+  `player.name` now falls back to the gameId and is never null.
+
+---
+
 ## 1.14.6-elimon.2
 
 Found during the live re-proof of `1.14.6-elimon.1` on a real Hytale 0.6.8 server.

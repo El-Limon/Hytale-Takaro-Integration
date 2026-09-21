@@ -46,13 +46,31 @@ class BansTest {
     }
 
     @Test
-    void permanentBanHasNullExpiresAtAndUnknownNameStaysNull() {
+    void permanentBanHasNullExpiresAtAndFallsBackToTheGameIdAsName() {
         Map<String, Object> ban = Bans.toIBan("aaaa0000-0000-0000-0000-000000000001", null, null, null);
         assertTrue(ban.containsKey("expiresAt"));
         assertNull(ban.get("expiresAt"));
         assertNull(ban.get("reason"));
         @SuppressWarnings("unchecked")
         Map<String, Object> player = (Map<String, Object>) ban.get("player");
-        assertNull(player.get("name"));
+        // F16: name must never be null - Takaro's BanDTO rejects the whole response.
+        assertEquals("aaaa0000-0000-0000-0000-000000000001", player.get("name"));
+    }
+
+    @Test
+    void banPlayerNameIsNeverNull() {
+        // F16: Takaro's BanDTO validates player.name with isString; null fails the whole response.
+        @SuppressWarnings("unchecked")
+        Map<String, Object> p1 = (Map<String, Object>) Bans.toIBan(
+            "d34db33f-0000-4000-8000-000000000001", null, "r", null).get("player");
+        assertEquals("d34db33f-0000-4000-8000-000000000001", p1.get("name"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> p2 = (Map<String, Object>) Bans.toIBan("abc", "   ", "r", null).get("player");
+        assertEquals("abc", p2.get("name"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> p3 = (Map<String, Object>) Bans.toIBan("abc", "GrandGrotto216", "r", null).get("player");
+        assertEquals("GrandGrotto216", p3.get("name"));
     }
 }

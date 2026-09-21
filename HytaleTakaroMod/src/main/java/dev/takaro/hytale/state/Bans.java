@@ -54,7 +54,13 @@ public final class Bans {
     public static Map<String, Object> toIBan(String gameId, String name, String reason, Instant expiresOn) {
         Map<String, Object> player = new HashMap<>();
         player.put("gameId", gameId);
-        player.put("name", name);
+        // F16: Takaro's BanDTO validates player.name with isString. A Hytale Ban carries no
+        // name, so a target that is not in the known-players ledger (banned by UUID, or banned
+        // before this build started keeping the ledger) used to send name:null - and Takaro
+        // rejected the WHOLE listBans response with
+        //   "An instance of BanDTO has failed the validation: property player.name ... isString".
+        // The gameId is a truthful stand-in; it is never null.
+        player.put("name", name == null || name.trim().isEmpty() ? gameId : name);
         player.put("platformId", "hytale:" + gameId);
 
         Map<String, Object> ban = new HashMap<>();
