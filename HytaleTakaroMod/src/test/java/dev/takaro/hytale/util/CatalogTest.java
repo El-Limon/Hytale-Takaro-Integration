@@ -25,4 +25,30 @@ class CatalogTest {
         assertFalse(Catalog.isDeveloperAsset(null));
         assertFalse(Catalog.isDeveloperAsset(""));
     }
+
+    @Test
+    void dropsScaffoldingRolesThatAreNotEntities() {
+        assertTrue(Catalog.isPlaceholderRole("Static"));
+        assertTrue(Catalog.isPlaceholderRole("Static2"));
+        assertTrue(Catalog.isPlaceholderRole("Static4"));
+        assertTrue(Catalog.isPlaceholderRole("Template"));
+        assertTrue(Catalog.isPlaceholderRole("BlankTemplate"));
+        assertTrue(Catalog.isPlaceholderRole("Empty_Role"));
+        assertTrue(Catalog.isPlaceholderRole(null));
+        assertFalse(Catalog.isPlaceholderRole("Bat_Ice"));
+        assertFalse(Catalog.isPlaceholderRole("StaticTrork"));
+    }
+
+    @Test
+    void buildsTheRoleTranslationKeyHytaleUses() {
+        assertEquals("npcRoles.Bat_Ice.name", Catalog.roleNameKey("Bat_Ice"));
+    }
+
+    @Test
+    void humanisesOnlyAsALastResort() {
+        assertEquals("Rex Cave", Catalog.humanise("Rex_Cave"));
+        assertEquals("Trork Grunt", Catalog.humanise("trork_grunt"));
+        assertEquals("Bat", Catalog.humanise("Bat"));
+        assertEquals("", Catalog.humanise(null));
+    }
 }

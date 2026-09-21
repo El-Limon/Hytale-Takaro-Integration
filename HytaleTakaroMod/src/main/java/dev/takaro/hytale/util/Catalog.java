@@ -22,4 +22,59 @@ public final class Catalog {
         String lower = code.toLowerCase(Locale.ROOT);
         return lower.startsWith("debug_") || lower.startsWith("test_") || lower.startsWith("dev_");
     }
+
+    /**
+     * The i18n key Hytale itself uses for an NPC role's player-facing name (F18).
+     *
+     * <p>Found in {@code Server/Languages/en-US/server.lang} inside {@code Assets.zip} (and in
+     * {@code bundledDefaults/server.lang} inside the server jar): 574 entries of the form
+     * {@code npcRoles.Bat_Ice.name = Ice Bat}, {@code npcRoles.Cow_Calf.name = Calf}.
+     * {@code BuilderRole.getDisplayNames()} does not carry them.
+     */
+    public static String roleNameKey(String code) {
+        return "npcRoles." + code + ".name";
+    }
+
+    /**
+     * True for role templates that are engine scaffolding rather than creatures a server owner
+     * would ever want in a Takaro entity list: the {@code Static}/{@code Static2..4} marker
+     * roles, {@code Template} / {@code BlankTemplate}, and {@code Empty_Role}.
+     */
+    public static boolean isPlaceholderRole(String code) {
+        if (code == null || code.isEmpty()) {
+            return true;
+        }
+        if (code.equals("Template") || code.equals("BlankTemplate") || code.equals("Empty_Role")) {
+            return true;
+        }
+        // Static, Static2, Static3, ...
+        return code.startsWith("Static")
+            && code.substring("Static".length()).chars().allMatch(Character::isDigit);
+    }
+
+    /**
+     * Last-resort humanisation of a role id when the game has no translation for it:
+     * {@code Rex_Cave} becomes {@code "Rex Cave"}, {@code trork_grunt} becomes
+     * {@code "Trork Grunt"}. Deliberately does not try to reorder words - inventing
+     * {@code "Cave Rex"} when the game never said so would be a guess dressed as a name.
+     */
+    public static String humanise(String code) {
+        if (code == null || code.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (String word : code.split("[_\\-]+")) {
+            if (word.isEmpty()) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(' ');
+            }
+            out.append(Character.toUpperCase(word.charAt(0)));
+            if (word.length() > 1) {
+                out.append(word.substring(1));
+            }
+        }
+        return out.length() == 0 ? code : out.toString();
+    }
 }

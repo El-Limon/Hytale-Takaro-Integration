@@ -2563,6 +2563,34 @@ public class TakaroRequestHandler {
      * {@code NPCPlugin.getRoleTemplateNames(true)} returns the SPAWNABLE templates only, which
      * is what keeps abstract base templates out of the list.
      */
+    /**
+     * The player-facing name of an NPC role, from Hytale's own translation table (F18).
+     *
+     * <p>{@code Message.translation(key)} rendered to plain text resolves through
+     * {@code I18nModule}; when the key is unknown the renderer falls back to echoing the key
+     * itself, which is how a missing translation is detected here (returns {@code null} so the
+     * caller can try the builder and then a humanised role id).
+     *
+     * @return the display name, or {@code null} when the game has no translation for this role
+     */
+    private String translateRoleName(String roleName) {
+        String key = dev.takaro.hytale.util.Catalog.roleNameKey(roleName);
+        try {
+            String translated = com.hypixel.hytale.server.core.util.MessageUtil.formatMessageToPlainString(
+                com.hypixel.hytale.server.core.Message.translation(key).getFormattedMessage());
+            if (translated == null) {
+                return null;
+            }
+            translated = translated.trim();
+            if (translated.isEmpty() || translated.equals(key)) {
+                return null;
+            }
+            return translated;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private Object handleListEntities() {
         try {
             com.hypixel.hytale.server.npc.NPCPlugin npc = com.hypixel.hytale.server.npc.NPCPlugin.get();
@@ -2574,6 +2602,7 @@ public class TakaroRequestHandler {
             boolean includeDebug = plugin.getConfig().isCatalogIncludeDebug();
             List<Map<String, Object>> entities = new ArrayList<>();
             int skipped = 0;
+            int humanised = 0;
 
             for (String roleName : npc.getRoleTemplateNames(true)) {
                 if (roleName == null || roleName.isEmpty()) {
@@ -2583,8 +2612,18 @@ public class TakaroRequestHandler {
                     skipped++;
                     continue;
                 }
+                // F18: Static/Static2../Template/BlankTemplate/Empty_Role are engine scaffolding,
+                // not entities. They are dropped whatever CATALOG_INCLUDE_DEBUG says.
+                if (dev.takaro.hytale.util.Catalog.isPlaceholderRole(roleName)) {
+                    skipped++;
+                    continue;
+                }
 
-                String displayName = roleName;
+                // F18: the player-facing name lives in Hytale's own i18n table as
+                // npcRoles.<Role>.name (574 entries in server.lang), NOT in
+                // BuilderRole.getDisplayNames(). Translation first, builder second, and only
+                // then a humanised form of the id.
+                String displayName = translateRoleName(roleName);
                 String description = null;
                 try {
                     com.hypixel.hytale.server.npc.asset.builder.BuilderInfo info =
@@ -2593,7 +2632,8 @@ public class TakaroRequestHandler {
                         com.hypixel.hytale.server.npc.role.builders.BuilderRole role =
                             (com.hypixel.hytale.server.npc.role.builders.BuilderRole) info.getBuilder();
                         String[] names = role.getDisplayNames();
-                        if (names != null && names.length > 0 && names[0] != null && !names[0].isEmpty()) {
+                        if (displayName == null
+                            && names != null && names.length > 0 && names[0] != null && !names[0].isEmpty()) {
                             displayName = names[0];
                         }
                         String shortDescription = role.getShortDescription();
@@ -2603,6 +2643,11 @@ public class TakaroRequestHandler {
                     }
                 } catch (Exception e) {
                     // Keep the role id as the name rather than dropping the entry.
+                }
+
+                if (displayName == null || displayName.isEmpty()) {
+                    displayName = dev.takaro.hytale.util.Catalog.humanise(roleName);
+                    humanised++;
                 }
 
                 Map<String, Object> entity = new HashMap<>();
@@ -2618,7 +2663,8 @@ public class TakaroRequestHandler {
             }
 
             plugin.getLogger().at(java.util.logging.Level.INFO).log("listEntities: " + entities.size()
-                + " spawnable role(s), " + skipped + " developer entries filtered");
+                + " spawnable role(s), " + skipped + " developer/placeholder entries filtered, "
+                + humanised + " without a translated name (humanised role id)");
             return entities;
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error listing entities: " + e.getMessage());
