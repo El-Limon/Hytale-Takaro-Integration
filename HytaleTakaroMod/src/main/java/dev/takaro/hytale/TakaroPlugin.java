@@ -246,11 +246,18 @@ public class TakaroPlugin extends JavaPlugin {
      * Start HytaleCharts integration - heartbeat and promo links
      */
     private void startHytaleCharts() {
+        // HytaleCharts is strictly opt-in. No secret means no third-party traffic and no
+        // nagging: an operator who has not asked for it should not be told about it on every
+        // boot, and must never have player names and UUIDs sent anywhere by default (F3).
         String secret = config.getHytaleChartsSecret();
-        if (secret == null || secret.isEmpty() || secret.equals("YOUR_SECRET_HERE")) {
-            getLogger().at(java.util.logging.Level.WARNING).log("HytaleCharts not configured! Generate a heartbeat secret at hytalecharts.com");
+        if (secret == null || secret.trim().isEmpty() || secret.equals("YOUR_SECRET_HERE")) {
+            getLogger().at(java.util.logging.Level.FINE).log("HytaleCharts disabled (no HYTALECHARTS_SECRET set)");
             return;
         }
+        getLogger().at(java.util.logging.Level.INFO).log(
+            "HytaleCharts is ENABLED - this server will send its player list (usernames and UUIDs) "
+                + "to hytalecharts.com every " + HEARTBEAT_INTERVAL_SECONDS + "s. "
+                + "Clear HYTALECHARTS_SECRET to turn it off.");
 
         hytaleChartsScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "HytaleCharts-Heartbeat");

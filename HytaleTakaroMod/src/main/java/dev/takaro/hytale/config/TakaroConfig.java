@@ -58,9 +58,9 @@ public class TakaroConfig {
         properties.setProperty("CATALOG_INCLUDE_DEBUG", "false");
 
         // HytaleCharts integration defaults
-        properties.setProperty("HYTALECHARTS_SECRET", "YOUR_SECRET_HERE");
+        properties.setProperty("HYTALECHARTS_SECRET", "");
         properties.setProperty("HYTALECHARTS_DEBUG", "false");
-        properties.setProperty("HYTALECHARTS_PROMO_ON_LOGIN", "true");
+        properties.setProperty("HYTALECHARTS_PROMO_ON_LOGIN", "false");
         properties.setProperty("HYTALECHARTS_PROMO_ENABLED", "false");
         properties.setProperty("HYTALECHARTS_PROMO_INTERVAL_MINUTES", "15");
         properties.setProperty("HYTALECHARTS_PROMO_PREFIX", "[hytalecharts.com] ");
@@ -95,7 +95,9 @@ public class TakaroConfig {
                 writer.write("# CATALOG_INCLUDE_DEBUG: include Debug_/Test_/Dev_ entries in listItems and listEntities.\n");
                 writer.write("CATALOG_INCLUDE_DEBUG=false\n");
                 writer.write("\n");
-                writer.write("# HytaleCharts Integration:\n");
+                writer.write("# HytaleCharts Integration (third party, OPT-IN - all of it is off below):\n");
+                writer.write("# Setting HYTALECHARTS_SECRET sends this server's player list (usernames and\n");
+                writer.write("# UUIDs) to hytalecharts.com every 5 minutes. Leave it blank to send nothing.\n");
                 writer.write("# HYTALECHARTS_SECRET: Get this from hytalecharts.com (generate heartbeat secret)\n");
                 writer.write("# HYTALECHARTS_DEBUG: Enable debug logging (true/false)\n");
                 writer.write("# HYTALECHARTS_PROMO_ON_LOGIN: Send promo link when player joins (true/false)\n");
@@ -104,9 +106,9 @@ public class TakaroConfig {
                 writer.write("# HYTALECHARTS_PROMO_PREFIX: Prefix before promo message (set to empty string to disable)\n");
                 writer.write("# HYTALECHARTS_PROMO_MESSAGE: Promo link message text\n");
                 writer.write("# HYTALECHARTS_PROMO_URL: URL for the clickable link\n");
-                writer.write("HYTALECHARTS_SECRET=YOUR_SECRET_HERE\n");
+                writer.write("HYTALECHARTS_SECRET=\n");
                 writer.write("HYTALECHARTS_DEBUG=false\n");
-                writer.write("HYTALECHARTS_PROMO_ON_LOGIN=true\n");
+                writer.write("HYTALECHARTS_PROMO_ON_LOGIN=false\n");
                 writer.write("HYTALECHARTS_PROMO_ENABLED=false\n");
                 writer.write("HYTALECHARTS_PROMO_INTERVAL_MINUTES=15\n");
                 writer.write("HYTALECHARTS_PROMO_PREFIX=[hytalecharts.com] \n");
@@ -205,7 +207,7 @@ public class TakaroConfig {
 
     // HytaleCharts configuration
     public String getHytaleChartsSecret() {
-        return properties.getProperty("HYTALECHARTS_SECRET", "YOUR_SECRET_HERE");
+        return properties.getProperty("HYTALECHARTS_SECRET", "");
     }
 
     public boolean getHytaleChartsDebug() {
@@ -213,7 +215,7 @@ public class TakaroConfig {
     }
 
     public boolean getHytaleChartsPromoOnLogin() {
-        return Boolean.parseBoolean(properties.getProperty("HYTALECHARTS_PROMO_ON_LOGIN", "true"));
+        return Boolean.parseBoolean(properties.getProperty("HYTALECHARTS_PROMO_ON_LOGIN", "false"));
     }
 
     public boolean getHytaleChartsPromoEnabled() {

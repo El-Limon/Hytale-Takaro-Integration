@@ -4,21 +4,21 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
-## ⚠️ IMPORTANT: Configuration File Changes
+## Configuration file location
 
-**The configuration file has changed location and format!**
+The config file is created and read at:
 
-**Old Location:** `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/HytaleTakaroMod/TakaroConfig.properties`
+```
+<mods folder>/HytaleTakaroMod/TakaroConfig.properties
+```
 
-**New Location:** `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/TakaroConfig.properties`
+- Dedicated server: `<server directory>/mods/HytaleTakaroMod/TakaroConfig.properties`
+- Client-hosted world: `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/HytaleTakaroMod/TakaroConfig.properties`
 
-### Migration Steps:
-1. **Copy your old config file** from the HytaleTakaroMod subdirectory to the mods folder directly
-2. **Transfer your settings**:
-   - Copy your `IDENTITY_TOKEN` value
-   - Copy your `REGISTRATION_TOKEN` value
-3. **Delete the old config** and HytaleTakaroMod subdirectory
-4. **The new config will be auto-created** on first run with new settings (COMMAND_PREFIX, COMMAND_RESPONSE)
+An earlier entry in this file announced a move to `mods/TakaroConfig.properties`. That move
+never happened in the code (`TakaroPlugin.setup()` has always resolved the `HytaleTakaroMod`
+subdirectory), so anyone who followed it edited a file the mod never reads. The documented
+path now matches the code, and the code is unchanged so existing installs keep working.
 
 ### ⚠️ CRITICAL WARNING - DEV Configuration
 **DO NOT ENABLE DEV CONFIGURATION UNLESS YOU ARE A DEVELOPER!**
@@ -57,7 +57,7 @@ All notable features added to the Hytale-Takaro Integration Mod.
 - **Command Interception**: Commands no longer appear in public chat (behaves like Hytale's `/` commands)
 
 ### Changed
-- **Configuration File Location**: Moved from `mods/HytaleTakaroMod/TakaroConfig.properties` to `mods/TakaroConfig.properties` (see migration steps above)
+- **Configuration File Location**: documented as `mods/TakaroConfig.properties`. This was never true - the code always used `mods/HytaleTakaroMod/TakaroConfig.properties`. Corrected at the top of this file.
 
 ## [1.11.3] - 2026-01-19
 

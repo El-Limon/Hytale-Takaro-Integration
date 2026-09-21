@@ -289,11 +289,37 @@ public class TakaroRequestHandler {
         }
     }
 
+    /** Real server identity, instead of the hardcoded "Hytale Server" / "1.0" placeholder. */
     private Object handleGetServerInfo() {
-        // TODO: Implement actual server info from Hytale API
         Map<String, Object> info = new HashMap<>();
-        info.put("name", "Hytale Server");
-        info.put("version", "1.0");
+        String name = "Hytale Server";
+        String version = "unknown";
+        try {
+            com.hypixel.hytale.server.core.HytaleServerConfig serverConfig = HytaleServer.get().getConfig();
+            if (serverConfig != null && serverConfig.getMotd() != null && !serverConfig.getMotd().isEmpty()) {
+                name = serverConfig.getMotd();
+            }
+            info.put("maxPlayers", serverConfig == null ? null : serverConfig.getMaxPlayers());
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.WARNING).log("getServerInfo: could not read server config: " + e.getMessage());
+        }
+        try {
+            String reported = com.hypixel.hytale.common.util.java.ManifestUtil.getVersion();
+            if (reported != null && !reported.isEmpty()) {
+                version = reported;
+            }
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.WARNING).log("getServerInfo: could not read server version: " + e.getMessage());
+        }
+        try {
+            info.put("onlinePlayers", com.hypixel.hytale.server.core.universe.Universe.get().getPlayerCount());
+        } catch (Exception ignored) {
+            // optional
+        }
+
+        info.put("name", name);
+        info.put("version", version);
+        info.put("connectorVersion", plugin.getVersion());
         return info;
     }
 
@@ -2758,7 +2784,7 @@ public class TakaroRequestHandler {
         getServerInfo.put("action", "getServerInfo");
         getServerInfo.put("description", "Get server information");
         getServerInfo.put("payload", "{}");
-        getServerInfo.put("returns", "{\"name\": \"Hytale Server\", \"version\": \"1.0\"}");
+        getServerInfo.put("returns", "{\"name\": \"<motd>\", \"version\": \"<hytale server version>\", \"connectorVersion\": \"...\", \"maxPlayers\": 20, \"onlinePlayers\": 1}");
         actions.add(getServerInfo);
 
         // sendMessage
