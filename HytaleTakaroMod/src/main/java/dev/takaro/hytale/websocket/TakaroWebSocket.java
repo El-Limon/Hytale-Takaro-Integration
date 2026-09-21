@@ -58,6 +58,13 @@ public class TakaroWebSocket extends WebSocketClient {
             JsonObject json = gson.fromJson(message, JsonObject.class);
             String type = json.get("type").getAsString();
 
+            WireLogger.frame(config.isDebug(), getLogPrefix(), WireLogger.IN, type,
+                json.has("requestId") && !json.get("requestId").isJsonNull()
+                    ? json.get("requestId").getAsString() : null,
+                json.has("payload") && json.get("payload").isJsonObject()
+                    && json.getAsJsonObject("payload").has("action")
+                    ? json.getAsJsonObject("payload").get("action").getAsString() : null);
+
             switch (type) {
                 case "identifyResponse":
                     handleIdentifyResponse(json);
@@ -202,6 +209,10 @@ public class TakaroWebSocket extends WebSocketClient {
             return;
         }
         try {
+            WireLogger.frame(config.isDebug(), getLogPrefix(), WireLogger.OUT,
+                String.valueOf(message.get("type")),
+                message.get("requestId") == null ? null : String.valueOf(message.get("requestId")),
+                eventTypeOf(message));
             send(gson.toJson(message));
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix() + "Send failed: " + e.getMessage());
@@ -265,6 +276,16 @@ public class TakaroWebSocket extends WebSocketClient {
             }
             sendToTakaro(event);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String eventTypeOf(Map<String, Object> message) {
+        Object payload = message.get("payload");
+        if (payload instanceof Map) {
+            Object type = ((Map<String, Object>) payload).get("type");
+            return type == null ? null : String.valueOf(type);
+        }
+        return null;
     }
 
     /** Number of events currently waiting to be sent (for /takarodebug). */

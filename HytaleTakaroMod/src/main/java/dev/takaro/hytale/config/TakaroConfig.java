@@ -51,6 +51,10 @@ public class TakaroConfig {
         properties.setProperty("REGISTRATION_TOKEN", "");
         properties.setProperty("COMMAND_PREFIX", "!");
         properties.setProperty("COMMAND_RESPONSE", "[cyan]Command[-] [green]{prefix}{command}[-]");
+        properties.setProperty("TAKARO_DEBUG", "false");
+        properties.setProperty("LOG_FORWARD_LEVEL", "INFO");
+        properties.setProperty("LOG_FORWARD_MAX_PER_MIN", "120");
+        properties.setProperty("EVENT_QUEUE_SIZE", "1000");
 
         // HytaleCharts integration defaults
         properties.setProperty("HYTALECHARTS_SECRET", "YOUR_SECRET_HERE");
@@ -77,6 +81,16 @@ public class TakaroConfig {
                 writer.write("REGISTRATION_TOKEN=\n");
                 writer.write("COMMAND_PREFIX=!\n");
                 writer.write("COMMAND_RESPONSE=[cyan]Command[-] [green]{prefix}{command}[-]\n");
+                writer.write("\n");
+                writer.write("# Diagnostics:\n");
+                writer.write("# TAKARO_DEBUG: log every WebSocket frame (direction, type, requestId, action) at INFO.\n");
+                writer.write("# LOG_FORWARD_LEVEL: minimum server log level forwarded to Takaro (OFF disables forwarding).\n");
+                writer.write("# LOG_FORWARD_MAX_PER_MIN: cap on forwarded log records per minute (0 = unlimited).\n");
+                writer.write("# EVENT_QUEUE_SIZE: how many game events to hold while Takaro is unreachable.\n");
+                writer.write("TAKARO_DEBUG=false\n");
+                writer.write("LOG_FORWARD_LEVEL=INFO\n");
+                writer.write("LOG_FORWARD_MAX_PER_MIN=120\n");
+                writer.write("EVENT_QUEUE_SIZE=1000\n");
                 writer.write("\n");
                 writer.write("# HytaleCharts Integration:\n");
                 writer.write("# HYTALECHARTS_SECRET: Get this from hytalecharts.com (generate heartbeat secret)\n");
@@ -151,6 +165,25 @@ public class TakaroConfig {
             return Math.max(1, Integer.parseInt(properties.getProperty("EVENT_QUEUE_SIZE", "1000").trim()));
         } catch (NumberFormatException e) {
             return 1000;
+        }
+    }
+
+    /** Trace every WebSocket frame at INFO (F9). */
+    public boolean isDebug() {
+        return Boolean.parseBoolean(properties.getProperty("TAKARO_DEBUG", "false").trim());
+    }
+
+    /** Minimum level of a server log record that is forwarded to Takaro as a log event. */
+    public String getLogForwardLevel() {
+        return properties.getProperty("LOG_FORWARD_LEVEL", "INFO").trim();
+    }
+
+    /** Upper bound on forwarded log records per minute; 0 means unlimited. */
+    public int getLogForwardMaxPerMin() {
+        try {
+            return Integer.parseInt(properties.getProperty("LOG_FORWARD_MAX_PER_MIN", "120").trim());
+        } catch (NumberFormatException e) {
+            return 120;
         }
     }
 
