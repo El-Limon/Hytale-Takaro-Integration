@@ -395,193 +395,188 @@ public class TakaroRequestHandler {
     }
 
     private Object handleExecuteCommand(JsonObject payload) {
+        String command;
         try {
             // The payload structure is: {"args": "{\"command\":\"help\"}"}
-            // We need to parse the args string as JSON
             String argsString = payload.get("args").getAsString();
             JsonObject args = gson.fromJson(argsString, JsonObject.class);
-            String command = args.get("command").getAsString().trim();
+            command = args.get("command").getAsString().trim();
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error parsing executeConsoleCommand payload: " + e.getMessage());
+            return commandResult(false, "Error: could not read command from payload: " + e.getMessage());
+        }
 
+        if (command.isEmpty()) {
+            return commandResult(false, "No command provided");
+        }
+
+        try {
             plugin.getLogger().at(java.util.logging.Level.INFO).log("Executing console command: '" + command + "'");
 
-            // Check if it's a request for help/documentation
-            if (command.equalsIgnoreCase("help") ||
-                command.equalsIgnoreCase("commands") ||
-                command.equalsIgnoreCase("getavailableactions") ||
-                command.equalsIgnoreCase("takarohelp") ||
-                command.equalsIgnoreCase("takaro")) {
-                return buildHelpResponse();
+            // Takaro's own helper commands live in their own namespace so that they can never
+            // shadow a real Hytale command (F6). Everything else is passed straight to Hytale.
+            String lower = command.toLowerCase(Locale.ROOT);
+            if (lower.equals("takaro")) {
+                return handleTakaroSubCommand("help");
+            }
+            if (lower.startsWith("takaro ")) {
+                return handleTakaroSubCommand(command.substring("takaro ".length()).trim());
             }
 
-            // Check if it's a request to list Hytale commands
-            if (command.equalsIgnoreCase("listcommands")) {
-                return buildListCommandsResponse();
-            }
-
-            // Check for API action shortcuts typed as console commands
-            if (command.equalsIgnoreCase("testReachability")) {
-                return handleTestReachability();
-            }
-            if (command.equalsIgnoreCase("getPlayers")) {
-                return handleGetPlayers();
-            }
-            if (command.equalsIgnoreCase("getServerInfo")) {
-                return handleGetServerInfo();
-            }
-            if (command.equalsIgnoreCase("listItems")) {
-                List<Map<String, Object>> items = (List<Map<String, Object>>) handleListItems();
-                Map<String, Object> result = new HashMap<>();
-                result.put("success", true);
-                result.put("rawResult", "Found " + items.size() + " items. Use Takaro UI to view item list.");
-                return result;
-            }
-
-            // sendMessage <message>
-            if (command.toLowerCase().startsWith("sendmessage ")) {
-                String message = command.substring("sendmessage ".length()).trim();
-                JsonObject msgPayload = new JsonObject();
-                JsonObject msgArgs = new JsonObject();
-                msgArgs.addProperty("message", message);
-                msgPayload.addProperty("args", gson.toJson(msgArgs));
-                return handleSendMessage(msgPayload);
-            }
-
-            // getPlayerInventory <player>
-            if (command.toLowerCase().startsWith("getplayerinventory ")) {
-                String playerName = command.substring("getplayerinventory ".length()).trim();
-                return getPlayerInventoryByName(playerName);
-            }
-
-            // getPlayerLocation <player>
-            if (command.toLowerCase().startsWith("getplayerlocation ")) {
-                String playerName = command.substring("getplayerlocation ".length()).trim();
-                return getPlayerLocationByName(playerName);
-            }
-
-            // kickPlayer <player> [reason]
-            if (command.toLowerCase().startsWith("kickplayer ")) {
-                String[] parts = command.substring("kickplayer ".length()).split(" ", 2);
-                String playerName = parts[0];
-                String reason = parts.length > 1 ? parts[1] : "Kicked by admin";
-                return kickPlayerByName(playerName, reason);
-            }
-
-            // banPlayer <player>
-            if (command.toLowerCase().startsWith("banplayer ")) {
-                String playerName = command.substring("banplayer ".length()).trim();
-                return banPlayerByName(playerName);
-            }
-
-            // unbanPlayer <player>
-            if (command.toLowerCase().startsWith("unbanplayer ")) {
-                String playerName = command.substring("unbanplayer ".length()).trim();
-                return unbanPlayerByName(playerName);
-            }
-
-            // Check if it's a request for player locations
-            if (command.equalsIgnoreCase("playerlocations") ||
-                command.equalsIgnoreCase("locations") ||
-                command.equalsIgnoreCase("whereis") ||
-                command.equalsIgnoreCase("players")) {
-                return buildPlayerLocationsResponse();
-            }
-
-            // Check if it's a request for player bed locations
-            if (command.toLowerCase().startsWith("beds ") ||
-                command.toLowerCase().startsWith("playerbeds ")) {
-                return handleBedsConsoleCommand(command);
-            }
-
-            // Check if it's a setcolor command
-            if (command.toLowerCase().startsWith("setcolor ") ||
-                command.toLowerCase().startsWith("namecolor ")) {
-                return handleSetColorConsoleCommand(command);
-            }
-
-            // Check if it's a give command
-            if (command.toLowerCase().startsWith("give ")) {
-                plugin.getLogger().at(java.util.logging.Level.INFO).log("Matched give command, calling handler");
-                return handleGiveConsoleCommand(command);
-            }
-
-            // Check if it's a teleport command
-            if (command.toLowerCase().startsWith("teleportplayer ") ||
-                command.toLowerCase().startsWith("tp ")) {
-                return handleTeleportConsoleCommand(command);
-            }
-
-            // Check if it's a teleport player to player command
-            if (command.toLowerCase().startsWith("teleportplayertoplayer ") ||
-                command.toLowerCase().startsWith("tpp ")) {
-                return handleTeleportPlayerToPlayerConsoleCommand(command);
-            }
-
-            // Check if it's a shutdown/stop command
-            if (command.equalsIgnoreCase("shutdown") ||
-                command.equalsIgnoreCase("stop")) {
-                // Schedule shutdown after a delay to allow response to be sent
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(1000); // Wait 1 second to send response
-                        HytaleServer.get().getCommandManager().handleCommand(ConsoleSender.INSTANCE, command).join();
-                    } catch (Exception e) {
-                        plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error executing delayed shutdown: " + e.getMessage());
-                    }
-                }).start();
-
-                Map<String, Object> result = new HashMap<>();
-                result.put("success", true);
-                result.put("rawResult", "Server shutdown initiated");
-                return result;
-            }
-
-            // Subscribe to logger to capture all console output
-            CopyOnWriteArrayList<LogRecord> logCapture = new CopyOnWriteArrayList<>();
-            HytaleLoggerBackend.subscribe(logCapture);
-
-            try {
-                // Execute command
-                HytaleServer.get().getCommandManager().handleCommand(ConsoleSender.INSTANCE, command).join();
-
-                // Give async messages time to arrive
-                Thread.sleep(500);
-            } finally {
-                // Always unsubscribe
-                HytaleLoggerBackend.unsubscribe(logCapture);
-            }
-
-            // Extract messages from captured logs
-            StringBuilder output = new StringBuilder();
-            for (LogRecord record : logCapture) {
-                String message = record.getMessage();
-                if (message != null && !message.isEmpty()) {
-                    output.append(message).append("\n");
-                }
-            }
-
-            String outputStr = output.toString().trim();
-            plugin.getLogger().at(java.util.logging.Level.FINE).log("Captured " + logCapture.size() + " log records");
-
-            if (outputStr.isEmpty()) {
-                outputStr = "Command executed (no output)";
-            } else {
-                plugin.getLogger().at(java.util.logging.Level.FINE).log("Output preview: " + outputStr.substring(0, Math.min(100, outputStr.length())));
-            }
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("rawResult", outputStr);
-
-            plugin.getLogger().at(java.util.logging.Level.FINE).log("Command executed: " + command + " | Output length: " + outputStr.length());
-            return result;
+            return runHytaleCommand(command);
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error executing command: " + e.getMessage());
             e.printStackTrace();
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", false);
-            result.put("rawResult", "Error: " + e.getMessage());
-            return result;
+            return commandResult(false, "Error: " + e.getMessage());
         }
+    }
+
+    /**
+     * Takaro's own console helpers, reachable only as "takaro &lt;sub&gt;".
+     * Every branch must return {success:boolean, rawResult:String} - Takaro's CommandOutput
+     * DTO rejects a non-string rawResult with a 400 (F6).
+     */
+    private Map<String, Object> handleTakaroSubCommand(String sub) {
+        if (sub == null || sub.isEmpty() || sub.equalsIgnoreCase("help")) {
+            return buildHelpResponse();
+        }
+
+        String lower = sub.toLowerCase(Locale.ROOT);
+
+        if (lower.equals("listcommands")) {
+            return buildListCommandsResponse();
+        }
+        if (lower.equals("reachability") || lower.equals("testreachability")) {
+            Map<String, Object> r = asMap(handleTestReachability());
+            return commandResult(true, "connectable=" + r.get("connectable") + ", reason=" + r.get("reason"));
+        }
+        if (lower.equals("getplayers") || lower.equals("players")) {
+            return commandResult(true, formatPlayers(handleGetPlayers()));
+        }
+        if (lower.equals("getserverinfo") || lower.equals("serverinfo")) {
+            Map<String, Object> info = asMap(handleGetServerInfo());
+            return commandResult(true, "name=" + info.get("name") + ", version=" + info.get("version"));
+        }
+        if (lower.equals("listitems")) {
+            Object items = handleListItems();
+            int size = (items instanceof Collection) ? ((Collection<?>) items).size() : 0;
+            return commandResult(true, "Found " + size + " items. Use the Takaro UI to browse the item list.");
+        }
+        if (lower.equals("playerlocations") || lower.equals("locations") || lower.equals("whereis")) {
+            return buildPlayerLocationsResponse();
+        }
+        if (lower.startsWith("sendmessage ")) {
+            String message = sub.substring("sendmessage ".length()).trim();
+            JsonObject msgPayload = new JsonObject();
+            JsonObject msgArgs = new JsonObject();
+            msgArgs.addProperty("message", message);
+            msgPayload.addProperty("args", gson.toJson(msgArgs));
+            Map<String, Object> r = asMap(handleSendMessage(msgPayload));
+            boolean ok = Boolean.TRUE.equals(r.get("success"));
+            return commandResult(ok, ok ? "Message sent to all players" : "Failed to send message: " + r.get("error"));
+        }
+        if (lower.startsWith("getplayerinventory ")) {
+            return getPlayerInventoryByName(sub.substring("getplayerinventory ".length()).trim());
+        }
+        if (lower.startsWith("getplayerlocation ")) {
+            return getPlayerLocationByName(sub.substring("getplayerlocation ".length()).trim());
+        }
+        if (lower.startsWith("kickplayer ")) {
+            String[] parts = sub.substring("kickplayer ".length()).split(" ", 2);
+            return kickPlayerByName(parts[0], parts.length > 1 ? parts[1] : "Kicked by admin");
+        }
+        if (lower.startsWith("banplayer ")) {
+            return banPlayerByName(sub.substring("banplayer ".length()).trim());
+        }
+        if (lower.startsWith("unbanplayer ")) {
+            return unbanPlayerByName(sub.substring("unbanplayer ".length()).trim());
+        }
+        if (lower.startsWith("beds ") || lower.startsWith("playerbeds ")) {
+            return handleBedsConsoleCommand("beds " + sub.split("\\s+", 2)[1]);
+        }
+        if (lower.startsWith("setcolor ") || lower.startsWith("namecolor ")) {
+            return handleSetColorConsoleCommand("setcolor " + sub.split("\\s+", 2)[1]);
+        }
+        if (lower.startsWith("give ")) {
+            return handleGiveConsoleCommand("give " + sub.split("\\s+", 2)[1]);
+        }
+        if (lower.startsWith("tp ") || lower.startsWith("teleportplayer ")) {
+            return handleTeleportConsoleCommand("tp " + sub.split("\\s+", 2)[1]);
+        }
+        if (lower.startsWith("tpp ") || lower.startsWith("teleportplayertoplayer ")) {
+            return handleTeleportPlayerToPlayerConsoleCommand("tpp " + sub.split("\\s+", 2)[1]);
+        }
+        if (lower.equals("shutdown") || lower.equals("stop")) {
+            final String cmd = lower;
+            new Thread(() -> {
+                try {
+                    Thread.sleep(1000); // let the response go out first
+                    HytaleServer.get().getCommandManager().handleCommand(ConsoleSender.INSTANCE, cmd).join();
+                } catch (Exception e) {
+                    plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error executing delayed shutdown: " + e.getMessage());
+                }
+            }, "Takaro-Shutdown").start();
+            return commandResult(true, "Server shutdown initiated");
+        }
+
+        return commandResult(false, "Unknown takaro sub-command: " + sub + "\nType 'takaro help' for the list.");
+    }
+
+    /** Build the {success, rawResult} shape Takaro's CommandOutput DTO requires. */
+    static Map<String, Object> commandResult(boolean success, String rawResult) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", success);
+        result.put("rawResult", rawResult == null ? "" : rawResult);
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object o) {
+        return (o instanceof Map) ? (Map<String, Object>) o : new HashMap<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String formatPlayers(Object players) {
+        if (!(players instanceof Collection)) {
+            return "No players online";
+        }
+        Collection<Map<String, Object>> list = (Collection<Map<String, Object>>) players;
+        if (list.isEmpty()) {
+            return "No players online";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("Online players: ").append(list.size()).append("\n");
+        for (Map<String, Object> p : list) {
+            sb.append(String.format("%-20s %s%n", p.get("name"), p.get("gameId")));
+        }
+        return sb.toString().trim();
+    }
+
+    /** Run a real Hytale console command and return its output as a string. */
+    private Map<String, Object> runHytaleCommand(String command) throws Exception {
+        CopyOnWriteArrayList<LogRecord> logCapture = new CopyOnWriteArrayList<>();
+        HytaleLoggerBackend.subscribe(logCapture);
+
+        try {
+            HytaleServer.get().getCommandManager().handleCommand(ConsoleSender.INSTANCE, command).join();
+            Thread.sleep(500); // give async messages time to arrive
+        } finally {
+            HytaleLoggerBackend.unsubscribe(logCapture);
+        }
+
+        StringBuilder output = new StringBuilder();
+        for (LogRecord record : logCapture) {
+            String message = record.getMessage();
+            if (message != null && !message.isEmpty()) {
+                output.append(message).append("\n");
+            }
+        }
+
+        String outputStr = output.toString().trim();
+        if (outputStr.isEmpty()) {
+            outputStr = "Command executed (no output)";
+        }
+        return commandResult(true, outputStr);
     }
 
     private Object handleGiveItem(JsonObject payload) {
@@ -2364,65 +2359,31 @@ public class TakaroRequestHandler {
         help.append("    Description: Get this list (API version)\n");
         help.append("    Payload: {}\n\n");
 
-        help.append("=== CONSOLE COMMANDS ===\n");
-        help.append("Type these in Takaro console:\n\n");
-        help.append("HELP & INFO:\n");
-        help.append("  - help (or: commands, getavailableactions, takarohelp, takaro)\n");
-        help.append("    Shows this help menu\n\n");
-        help.append("  - testReachability\n");
-        help.append("    Test if server is reachable\n\n");
-        help.append("  - getPlayers\n");
-        help.append("    Get list of online players\n\n");
-        help.append("  - getServerInfo\n");
-        help.append("    Get server information\n\n");
-        help.append("  - listItems\n");
-        help.append("    Get list of all available items\n\n");
-        help.append("  - listCommands\n");
-        help.append("    Lists all available Hytale server commands\n\n");
-        help.append("  - playerlocations (or: locations, whereis, players)\n");
-        help.append("    Shows all online players and their coordinates\n\n");
-        help.append("  - beds <player> (or: playerbeds)\n");
-        help.append("    Shows all bed/respawn locations for a player\n");
-        help.append("    Example: beds Hennyy\n\n");
-        help.append("MESSAGING:\n");
-        help.append("  - sendMessage <message>\n");
-        help.append("    Send message to all players (supports [red]text[-] or [ff0000]text[-])\n");
-        help.append("    Example: sendMessage Hello everyone!\n");
-        help.append("    Example: sendMessage [red]Warning[-] Server restart in 5 minutes\n\n");
-        help.append("PLAYER INFO:\n");
-        help.append("  - getPlayerLocation <player>\n");
-        help.append("    Get player's current coordinates\n");
-        help.append("    Example: getPlayerLocation Hennyy\n\n");
-        help.append("  - getPlayerInventory <player>\n");
-        help.append("    Get player's inventory (API limitations - may return empty)\n");
-        help.append("    Example: getPlayerInventory Mad001\n\n");
-        help.append("PLAYER ACTIONS:\n");
-        help.append("  - give <player> <item> [amount]\n");
-        help.append("    Give items to a player\n");
-        help.append("    Example: give Mad001 Wood_Oak_Trunk 10\n\n");
-        help.append("  - teleportPlayer <player> <x> <y> <z> (or: tp)\n");
-        help.append("    Teleport player to coordinates\n");
-        help.append("    Example: tp Hennyy 100 64 200\n\n");
-        help.append("  - teleportPlayerToPlayer <player> <targetPlayer> (or: tpp)\n");
-        help.append("    Teleport player to another player\n");
-        help.append("    Example: tpp Hennyy Mad001\n\n");
-        help.append("  - setcolor <player> <color> (or: namecolor)\n");
-        help.append("    Set a player's chat name color\n");
-        help.append("    Example: setcolor Mad001 gold\n");
-        help.append("    Example: namecolor Hennyy ff0000\n\n");
-        help.append("MODERATION:\n");
-        help.append("  - kickPlayer <player> [reason]\n");
-        help.append("    Kick a player from the server\n");
-        help.append("    Example: kickPlayer Hennyy\n");
-        help.append("    Example: kickPlayer Mad001 Breaking rules\n\n");
-        help.append("  - banPlayer <player>\n");
-        help.append("    Ban a player (not implemented)\n");
-        help.append("    Example: banPlayer Griefer123\n\n");
-        help.append("  - unbanPlayer <player>\n");
-        help.append("    Unban a player (not implemented)\n");
-        help.append("    Example: unbanPlayer Griefer123\n\n");
+        help.append("=== TAKARO CONSOLE HELPERS ===\n");
+        help.append("All helpers live under the 'takaro' namespace so they can never shadow a\n");
+        help.append("real Hytale command. Anything that does not start with 'takaro ' is passed\n");
+        help.append("straight to the Hytale console.\n\n");
+        help.append("  takaro help                                 this menu\n");
+        help.append("  takaro listcommands                         all Hytale server commands\n");
+        help.append("  takaro reachability                         connectivity self-check\n");
+        help.append("  takaro getplayers                           online players + gameIds\n");
+        help.append("  takaro getserverinfo                        server name and version\n");
+        help.append("  takaro listitems                            item catalogue size\n");
+        help.append("  takaro playerlocations                      online players and coordinates\n");
+        help.append("  takaro sendmessage <message>                broadcast (supports [red]text[-])\n");
+        help.append("  takaro getplayerlocation <player>           a player's coordinates\n");
+        help.append("  takaro getplayerinventory <player>          a player's inventory\n");
+        help.append("  takaro beds <player>                        bed / respawn points\n");
+        help.append("  takaro give <player> <item> [amount]        give items\n");
+        help.append("  takaro tp <player> <x> <y> <z>              teleport to coordinates\n");
+        help.append("  takaro tpp <player> <targetPlayer>          teleport to a player\n");
+        help.append("  takaro setcolor <player> <color>            chat name colour\n");
+        help.append("  takaro kickplayer <player> [reason]         kick\n");
+        help.append("  takaro banplayer <player>                   ban\n");
+        help.append("  takaro unbanplayer <player>                 unban\n");
+        help.append("  takaro shutdown                             stop the server\n\n");
         help.append("STANDARD HYTALE:\n");
-        help.append("  - who, version, kick, etc. (all standard Hytale commands work)\n\n");
+        help.append("  who, version, kick, ... - every standard Hytale command works unchanged.\n\n");
 
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
@@ -2575,120 +2536,89 @@ public class TakaroRequestHandler {
 
     // Helper methods for console command shortcuts
 
-    private Object getPlayerInventoryByName(String playerName) {
-        try {
-            String gameId = getGameIdByName(playerName);
-            if (gameId == null) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("error", "Player not found: " + playerName);
-                return error;
-            }
-
-            JsonObject payload = new JsonObject();
-            JsonObject args = new JsonObject();
-            args.addProperty("gameId", gameId);
-            payload.addProperty("args", gson.toJson(args));
-            return handleGetPlayerInventory(payload);
-        } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("error", e.getMessage());
-            return error;
+    private Map<String, Object> getPlayerInventoryByName(String playerName) {
+        String gameId = getGameIdByName(playerName);
+        if (gameId == null) {
+            return commandResult(false, "Player not found: " + playerName);
         }
+        Object inv = handleGetPlayerInventory(argsPayload("gameId", gameId));
+        if (inv instanceof Map && ((Map<?, ?>) inv).containsKey("error")) {
+            return commandResult(false, String.valueOf(((Map<?, ?>) inv).get("error")));
+        }
+        StringBuilder sb = new StringBuilder("=== INVENTORY: " + playerName + " ===\n");
+        int count = 0;
+        if (inv instanceof Object[]) {
+            for (Object o : (Object[]) inv) {
+                Map<?, ?> item = (Map<?, ?>) o;
+                sb.append(String.format("%-40s x%s%n", item.get("name"), item.get("amount")));
+                count++;
+            }
+        }
+        if (count == 0) {
+            sb.append("(empty)");
+        }
+        return commandResult(true, sb.toString().trim());
     }
 
-    private Object getPlayerLocationByName(String playerName) {
-        try {
-            String gameId = getGameIdByName(playerName);
-            if (gameId == null) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("error", "Player not found: " + playerName);
-                return error;
-            }
-
-            JsonObject payload = new JsonObject();
-            JsonObject args = new JsonObject();
-            args.addProperty("gameId", gameId);
-            payload.addProperty("args", gson.toJson(args));
-            return handleGetPlayerLocation(payload);
-        } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("error", e.getMessage());
-            return error;
+    private Map<String, Object> getPlayerLocationByName(String playerName) {
+        String gameId = getGameIdByName(playerName);
+        if (gameId == null) {
+            return commandResult(false, "Player not found: " + playerName);
         }
+        Map<String, Object> loc = asMap(handleGetPlayerLocation(argsPayload("gameId", gameId)));
+        if (loc.containsKey("error")) {
+            return commandResult(false, String.valueOf(loc.get("error")));
+        }
+        return commandResult(true, String.format("%s is at X: %s, Y: %s, Z: %s",
+            playerName, loc.get("x"), loc.get("y"), loc.get("z")));
     }
 
-    private Object kickPlayerByName(String playerName, String reason) {
-        try {
-            String gameId = getGameIdByName(playerName);
-            if (gameId == null) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("error", "Player not found: " + playerName);
-                return error;
-            }
-
-            JsonObject payload = new JsonObject();
-            JsonObject args = new JsonObject();
-            args.addProperty("gameId", gameId);
-            args.addProperty("reason", reason);
-            payload.addProperty("args", gson.toJson(args));
-            return handleKickPlayer(payload);
-        } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("error", e.getMessage());
-            return error;
+    private Map<String, Object> kickPlayerByName(String playerName, String reason) {
+        String gameId = getGameIdByName(playerName);
+        if (gameId == null) {
+            return commandResult(false, "Player not found: " + playerName);
         }
+        JsonObject args = new JsonObject();
+        args.addProperty("gameId", gameId);
+        args.addProperty("reason", reason);
+        Map<String, Object> r = asMap(handleKickPlayer(wrapArgs(args)));
+        boolean ok = Boolean.TRUE.equals(r.get("success"));
+        return commandResult(ok, ok ? "Kicked " + playerName + ": " + reason
+                                    : "Could not kick " + playerName + ": " + r.get("error"));
     }
 
-    private Object banPlayerByName(String playerName) {
-        try {
-            String gameId = getGameIdByName(playerName);
-            if (gameId == null) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("error", "Player not found: " + playerName);
-                return error;
-            }
-
-            JsonObject payload = new JsonObject();
-            JsonObject args = new JsonObject();
-            args.addProperty("gameId", gameId);
-            payload.addProperty("args", gson.toJson(args));
-            return handleBanPlayer(payload);
-        } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("error", e.getMessage());
-            return error;
+    private Map<String, Object> banPlayerByName(String playerName) {
+        String gameId = getGameIdByName(playerName);
+        if (gameId == null) {
+            return commandResult(false, "Player not found: " + playerName);
         }
+        Map<String, Object> r = asMap(handleBanPlayer(argsPayload("gameId", gameId)));
+        boolean ok = Boolean.TRUE.equals(r.get("success"));
+        return commandResult(ok, ok ? "Banned " + playerName
+                                    : "Could not ban " + playerName + ": " + r.get("error"));
     }
 
-    private Object unbanPlayerByName(String playerName) {
-        try {
-            String gameId = getGameIdByName(playerName);
-            if (gameId == null) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("error", "Player not found: " + playerName);
-                return error;
-            }
-
-            JsonObject payload = new JsonObject();
-            JsonObject args = new JsonObject();
-            args.addProperty("gameId", gameId);
-            payload.addProperty("args", gson.toJson(args));
-            return handleUnbanPlayer(payload);
-        } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("error", e.getMessage());
-            return error;
+    private Map<String, Object> unbanPlayerByName(String playerName) {
+        String gameId = getGameIdByName(playerName);
+        if (gameId == null) {
+            return commandResult(false, "Player not found: " + playerName);
         }
+        Map<String, Object> r = asMap(handleUnbanPlayer(argsPayload("gameId", gameId)));
+        boolean ok = Boolean.TRUE.equals(r.get("success"));
+        return commandResult(ok, ok ? "Unbanned " + playerName
+                                    : "Could not unban " + playerName + ": " + r.get("error"));
+    }
+
+    private JsonObject argsPayload(String key, String value) {
+        JsonObject args = new JsonObject();
+        args.addProperty(key, value);
+        return wrapArgs(args);
+    }
+
+    private JsonObject wrapArgs(JsonObject args) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("args", gson.toJson(args));
+        return payload;
     }
 
     private String getGameIdByName(String playerName) {
