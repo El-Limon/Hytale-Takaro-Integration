@@ -4,6 +4,44 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
+## 1.14.6-elimon.5
+
+### Console
+- **F15** - `executeConsoleCommand` returned clean but incomplete output: `/help` came back as
+  its header line alone and `/who` as "Command executed (no output)". The cause was not that
+  these commands log their body - both write it to their `CommandSender` - but that
+  `Message.getAnsiMessage()` resolves the translation and its params while dropping the
+  message's *children*, which is exactly where `Message.insert(...)` attaches a command's body.
+  Output is now rendered with `MessageUtil.formatMessageToPlainString`, the plain-text twin of
+  what Hytale's own `ConsoleSender` uses.
+  A second, thread-scoped capture half picks up commands that really do log instead of
+  replying: log records are admitted only when `LogRecord.getLongThreadID()` matches a thread
+  known to be executing *that* command (`CommandManager.handleCommand` runs it on
+  `ForkJoinPool.commonPool()` and calls `CommandSender.getUsername()` before parsing, so the
+  sender registers the thread first thing). The global log stream is never taken - that was F7.
+  Both halves are merged, de-duplicated, stripped of `CommandManager`'s own
+  "... executed command: ..." echo and of the connector's own loggers, and capped at 400 lines
+  / 16000 characters.
+- New optional key `COMMAND_SETTLE_MS` (default `0`, capped at `2000`) for a command known to
+  answer asynchronously.
+
+### Catalogue
+- **F18** - `listEntities` named every row after the role id (`Bat_Ice`, `Cow_Calf`,
+  `Rex_Cave`), because `BuilderRole.getDisplayNames()` carries nothing for most roles. Hytale
+  keeps the player-facing names in its i18n table instead - 574 `npcRoles.<Role>.name` entries
+  in `Server/Languages/en-US/server.lang` ("Ice Bat", "Calf", "Cave Rex") - and that is now the
+  first source, followed by the builder and only then a humanised role id.
+- `Static`, `Static2`-`Static4`, `Template`, `BlankTemplate` and `Empty_Role` are engine
+  scaffolding, not entities, and are no longer listed.
+
+### Players
+- **F19** - `getPlayer` for a game id the server has never seen returned an error frame. Takaro
+  rejects every "no player" answer to that action and shows the operator an HTTP 400 blaming
+  their mod version; it now answers with a minimal `IGamePlayer` synthesised from the requested
+  id (`online: false`).
+
+---
+
 ## 1.14.6-elimon.4
 
 ### Catalogue

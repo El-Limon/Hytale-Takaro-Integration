@@ -8,7 +8,7 @@ Built and tested against **Hytale dedicated server 0.6.8**. Java 21+.
 
 ## Status
 
-This fork (`1.14.6-elimon.4`) is the result of a hard test of upstream `mad-001/Hytale-Takaro-Integration`
+This fork (`1.14.6-elimon.5`) is the result of a hard test of upstream `mad-001/Hytale-Takaro-Integration`
 against a real 0.6.8 server, followed by a fix pass. Upstream at `ba872f1` **does not compile** against
 0.6.8 at all, so there is no stock build to compare against.
 
@@ -24,7 +24,7 @@ a real client. Treat the table as "implemented, not yet proven".
 | `testReachability` | ⚠️ needs live test | Proven honest in the stock hard test (a stopped server reports unreachable) |
 | `getPlayers` | ⚠️ needs live test | Name, gameId, platformId, IP |
 | `getPlayer` — online | ⚠️ needs live test | |
-| `getPlayer` — offline | ⚠️ needs live test | Served from the known-players ledger; a never-seen player returns an error |
+| `getPlayer` — offline | ⚠️ needs live test | Served from the known-players ledger; a never-seen id gets a minimal `IGamePlayer` built from that id (`online:false`), never an error — Takaro 400s on any "no player" answer |
 | `getServerInfo` | ⚠️ needs live test | Real MOTD, real Hytale version, player counts |
 | `getPlayerLocation` | ⚠️ needs live test | Failures return an error, not `0,0,0` |
 | `getPlayerInventory` | ⚠️ needs live test | All six inventory sections; failures return an error, not `[]` |
@@ -36,9 +36,9 @@ a real client. Treat the table as "implemented, not yet proven".
 | `banPlayer` / `unbanPlayer` | ⚠️ needs live test | Real Hytale `AccessControlModule`; works offline by UUID; honours `expiresAt`; state is read back before success is reported |
 | `listBans` | ⚠️ needs live test | Takaro `IBan` shape; names come from the known-players ledger |
 | `listItems` | ⚠️ needs live test | Human-readable names; `Debug_*`/`Test_*`/`Dev_*` filtered |
-| `listEntities` | ⚠️ needs live test | Spawnable NPC role templates with display names |
+| `listEntities` | ⚠️ needs live test | Spawnable NPC role templates, named from Hytale's `npcRoles.<Role>.name` translations; scaffolding roles (`Static*`, `Template`, `Empty_Role`) excluded |
 | `listLocations` | ⚠️ needs live test | Named warps; empty list on a server with no warps |
-| `executeConsoleCommand` | ⚠️ needs live test | Per-command output capture; unknown command ⇒ `success:false` |
+| `executeConsoleCommand` | ⚠️ needs live test | Full output of the command and nothing else: its sender messages (children included, so `/help` returns its whole list) plus log records from the thread running that command; unknown command ⇒ `success:false` |
 | `shutdown` | ⚠️ needs live test | Graceful stop via the server's own shutdown path |
 | Events: connected, disconnected, chat-message, player-death, log | ⚠️ needs live test | |
 | Event: `entity-killed` | ⚠️ needs live test | Mob killed by a player; killer attributed |
@@ -50,7 +50,7 @@ a real client. Treat the table as "implemented, not yet proven".
 |---|---|
 | Weapon on a kill or a death | Hytale 0.6.8 records none. Neither `DeathComponent` nor `Damage` nor `Damage.Source` has an item field; the nearest thing is a UI icon id. The event's `weapon` is sent empty rather than guessed. |
 | Item quality on `giveItem` | 0.6.8's `ItemStack` has no quality/variant concept the plugin can set. The requested value is echoed back as `qualityIgnored` instead of being silently dropped. |
-| Hostile/friendly classification in `listEntities` | Role templates carry no such category field, so every row reports `type: "npc"`. |
+| Hostile/friendly classification in `listEntities` | Role templates carry no such category field, so the `type` key is omitted rather than invented. |
 | Map tiles | Takaro has no map support for Generic game servers. |
 | Regions / points of interest in `listLocations` | 0.6.8 has no POI, region or landmark API. Warps are the only named-point store. |
 | Backpack-aware `getPlayerInventory` guarantees beyond 0.6.8 | The whole `Inventory` class is `@Deprecated(forRemoval)` in 0.6.8; expect this to need rework on the next server release. |
@@ -59,10 +59,10 @@ a real client. Treat the table as "implemented, not yet proven".
 
 ## Install
 
-1. **Get the jar.** Build it (below) or take `HytaleTakaroMod-1.14.6-elimon.4.jar` from a release.
+1. **Get the jar.** Build it (below) or take `HytaleTakaroMod-1.14.6-elimon.5.jar` from a release.
 2. **Drop it in the server's mods folder:**
    ```
-   <server directory>/mods/HytaleTakaroMod-1.14.6-elimon.4.jar
+   <server directory>/mods/HytaleTakaroMod-1.14.6-elimon.5.jar
    ```
    (For a client-hosted world: `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/`.)
 3. **Start the server once.** It creates the config at:
@@ -95,6 +95,7 @@ Written to `mods/HytaleTakaroMod/TakaroConfig.properties`.
 | `LOG_FORWARD_MAX_PER_MIN` | `120` | Cap on forwarded log records per minute (`0` = unlimited) |
 | `EVENT_QUEUE_SIZE` | `1000` | Game events held while Takaro is unreachable; oldest dropped when full |
 | `CATALOG_INCLUDE_DEBUG` | `false` | Include `Debug_*`/`Test_*`/`Dev_*` entries in `listItems` and `listEntities` |
+| `COMMAND_SETTLE_MS` | `0` | Extra time (ms, max 2000) to keep collecting a console command's output after it finished |
 | `HYTALECHARTS_SECRET` | *(empty)* | **Opt-in.** Setting it sends this server's player list (usernames + UUIDs) to hytalecharts.com every 5 minutes |
 | `HYTALECHARTS_PROMO_ON_LOGIN` | `false` | Send a hytalecharts.com promo link to players when they join |
 | `HYTALECHARTS_PROMO_ENABLED` | `false` | Broadcast that promo link periodically |
@@ -119,7 +120,7 @@ Needs the Hytale server jar, which is not redistributable and is never committed
 mkdir -p libs
 cp /path/to/HytaleServer.jar libs/HytaleServer.jar
 cd HytaleTakaroMod && mvn clean package
-# -> HytaleTakaroMod/target/HytaleTakaroMod-1.14.6-elimon.4.jar
+# -> HytaleTakaroMod/target/HytaleTakaroMod-1.14.6-elimon.5.jar
 ```
 
 `mvn test` runs the unit tests (argument handling, event queue, ban mapping, response shaping,
