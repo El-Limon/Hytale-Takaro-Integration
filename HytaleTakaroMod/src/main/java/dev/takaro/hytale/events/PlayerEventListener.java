@@ -6,7 +6,9 @@ import dev.takaro.hytale.TakaroPlugin;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -15,8 +17,22 @@ import java.util.Map;
  */
 public class PlayerEventListener {
     private final TakaroPlugin plugin;
-    private final Map<String, Long> lastDisconnectTime = new HashMap<>();
     private static final long DISCONNECT_COOLDOWN_MS = 5000; // 5 seconds
+    private static final int MAX_TRACKED_DISCONNECTS = 512;
+
+    /**
+     * Last disconnect time per player, used to swallow the duplicate PlayerDisconnectEvents
+     * Hytale fires. It was a plain HashMap mutated from the event thread with no bound: it
+     * could be corrupted by concurrent access and grew forever on a long-running server.
+     * A synchronized access-ordered LinkedHashMap keeps it thread-safe and bounded.
+     */
+    private final Map<String, Long> lastDisconnectTime = Collections.synchronizedMap(
+        new LinkedHashMap<String, Long>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+                return size() > MAX_TRACKED_DISCONNECTS;
+            }
+        });
 
     public PlayerEventListener(TakaroPlugin plugin) {
         this.plugin = plugin;

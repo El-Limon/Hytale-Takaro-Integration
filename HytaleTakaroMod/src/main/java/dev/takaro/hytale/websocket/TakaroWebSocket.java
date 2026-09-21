@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import dev.takaro.hytale.TakaroPlugin;
 import dev.takaro.hytale.config.TakaroConfig;
+import dev.takaro.hytale.state.BoundedEventQueue;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 
@@ -23,7 +24,17 @@ public class TakaroWebSocket extends WebSocketClient {
     private int reconnectAttempts = 0;
     private static final int MAX_RECONNECT_DELAY = 60000; // 60 seconds
     private static final int BASE_RECONNECT_DELAY = 3000; // 3 seconds
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "Takaro-Reconnect");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** Events produced while the connection is down or not yet identified (F13). */
+    private final BoundedEventQueue<Map<String, Object>> pendingEvents;
+    private volatile boolean shuttingDown = false;
+    private long lastDropLogAt = 0L;
+    private static final long DROP_LOG_INTERVAL_MS = 30_000L;
 
     public TakaroWebSocket(TakaroPlugin plugin, TakaroConfig config, boolean isDev) throws Exception {
         super(new URI(isDev ? config.getDevWsUrl() : config.getWsUrl()));
@@ -31,12 +42,13 @@ public class TakaroWebSocket extends WebSocketClient {
         this.config = config;
         this.isDev = isDev;
         this.gson = new Gson();
+        this.pendingEvents = new BoundedEventQueue<>(config.getEventQueueSize());
     }
 
     @Override
     public void onOpen(ServerHandshake handshake) {
-        plugin.getLogger().at(java.util.logging.Level.INFO).log(getLogPrefix() + "Connected to WebSocket");
-        reconnectAttempts = 0;
+        plugin.getLogger().at(java.util.logging.Level.INFO).log(getLogPrefix()
+            + "Socket open - identifying (not yet connected to Takaro)");
         sendIdentify();
     }
 
@@ -73,8 +85,16 @@ public class TakaroWebSocket extends WebSocketClient {
 
     @Override
     public void onClose(int code, String reason, boolean remote) {
-        plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix() + "Disconnected: " + reason);
+        boolean wasIdentified = isIdentified;
         isIdentified = false;
+        if (shuttingDown) {
+            plugin.getLogger().at(java.util.logging.Level.INFO).log(getLogPrefix() + "Connection closed (shutting down)");
+            return;
+        }
+        plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix()
+            + "Disconnected (code " + code + ", remote=" + remote + "): " + reason
+            + (wasIdentified ? " - Takaro now considers this server offline" : "")
+            + " | " + pendingEvents.size() + " event(s) queued");
         scheduleReconnect();
     }
 
@@ -89,6 +109,10 @@ public class TakaroWebSocket extends WebSocketClient {
     }
 
     private void sendIdentify() {
+        // Re-read the properties file first, so an operator who fixes a stale token does not
+        // have to restart the whole server (F4).
+        config.reload();
+
         Map<String, Object> identify = new HashMap<>();
         identify.put("type", "identify");
 
@@ -110,12 +134,27 @@ public class TakaroWebSocket extends WebSocketClient {
 
     private void handleIdentifyResponse(JsonObject message) {
         JsonObject payload = message.getAsJsonObject("payload");
-        if (payload.has("error")) {
-            plugin.getLogger().at(java.util.logging.Level.SEVERE).log(getLogPrefix() + "Identification failed: " + payload.get("error").toString());
-        } else {
-            plugin.getLogger().at(java.util.logging.Level.INFO).log(getLogPrefix() + "Successfully identified");
-            isIdentified = true;
+        if (payload != null && payload.has("error") && !payload.get("error").isJsonNull()) {
+            isIdentified = false;
+            String error = payload.get("error").toString();
+            // An identification failure used to be logged once and then silently end all
+            // reconnect attempts, leaving a server that looked healthy on the console while
+            // Takaro saw it as offline (F4/F5). It is retryable: say why, loudly, and keep
+            // trying with backoff.
+            plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix()
+                + "Identification REJECTED by Takaro: " + error
+                + " | this server is NOT connected to Takaro."
+                + " Check IDENTITY_TOKEN and REGISTRATION_TOKEN in TakaroConfig.properties;"
+                + " the file is re-read before every attempt, so a fix takes effect without a restart."
+                + " Retrying with backoff (attempt " + (reconnectAttempts + 1) + ").");
+            close();
+            return;
         }
+
+        plugin.getLogger().at(java.util.logging.Level.INFO).log(getLogPrefix() + "Successfully identified");
+        isIdentified = true;
+        reconnectAttempts = 0;
+        flushPendingEvents();
     }
 
     private void handleTakaroRequest(JsonObject message) {
@@ -162,7 +201,11 @@ public class TakaroWebSocket extends WebSocketClient {
             plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix() + "Cannot send - not connected");
             return;
         }
-        send(gson.toJson(message));
+        try {
+            send(gson.toJson(message));
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix() + "Send failed: " + e.getMessage());
+        }
     }
 
     public void sendResponse(String requestId, Object payload) {
@@ -174,10 +217,6 @@ public class TakaroWebSocket extends WebSocketClient {
     }
 
     public void sendGameEvent(String eventType, Map<String, Object> data) {
-        if (!isIdentified) {
-            return;
-        }
-
         Map<String, Object> event = new HashMap<>();
         event.put("type", "gameEvent");
 
@@ -187,9 +226,55 @@ public class TakaroWebSocket extends WebSocketClient {
 
         event.put("payload", payload);
 
-        // Use FINE level to avoid infinite loop in log forwarding
-        plugin.getLogger().at(java.util.logging.Level.FINE).log(getLogPrefix() + "Sending game event: " + eventType);
+        // Takaro must not receive a gameEvent before identifyResponse, and events produced
+        // while the socket is down must not be lost. Park them instead of dropping them (F13).
+        if (!isIdentified || !isOpen()) {
+            if (shuttingDown) {
+                return;
+            }
+            boolean fitted = pendingEvents.offer(event);
+            if (!fitted) {
+                long now = System.currentTimeMillis();
+                if (now - lastDropLogAt > DROP_LOG_INTERVAL_MS) {
+                    lastDropLogAt = now;
+                    plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix()
+                        + "Event queue full (" + pendingEvents.capacity() + "), dropping oldest events - "
+                        + pendingEvents.droppedCount() + " dropped in total since startup");
+                }
+            }
+            return;
+        }
+
         sendToTakaro(event);
+    }
+
+    /** Send everything that was parked while the connection was unusable. */
+    private void flushPendingEvents() {
+        if (pendingEvents.isEmpty()) {
+            return;
+        }
+        java.util.List<Map<String, Object>> queued = pendingEvents.drain();
+        plugin.getLogger().at(java.util.logging.Level.INFO).log(getLogPrefix()
+            + "Flushing " + queued.size() + " queued game event(s)"
+            + (pendingEvents.droppedCount() > 0 ? " (" + pendingEvents.droppedCount() + " were dropped while full)" : ""));
+        for (Map<String, Object> event : queued) {
+            if (!isOpen()) {
+                // Connection died mid-flush; keep what is left rather than losing it.
+                pendingEvents.offer(event);
+                continue;
+            }
+            sendToTakaro(event);
+        }
+    }
+
+    /** Number of events currently waiting to be sent (for /takarodebug). */
+    public int getPendingEventCount() {
+        return pendingEvents.size();
+    }
+
+    /** Total events discarded because the queue was full. */
+    public long getDroppedEventCount() {
+        return pendingEvents.droppedCount();
     }
 
     private void scheduleReconnect() {
@@ -218,7 +303,9 @@ public class TakaroWebSocket extends WebSocketClient {
     }
 
     public void shutdown() {
+        shuttingDown = true;
         scheduler.shutdownNow();
+        pendingEvents.clear();
         close();
     }
 }

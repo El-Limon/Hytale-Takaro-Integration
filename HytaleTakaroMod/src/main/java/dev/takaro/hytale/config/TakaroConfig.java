@@ -13,6 +13,27 @@ public class TakaroConfig {
         load();
     }
 
+    /**
+     * Re-read the properties file from disk.
+     *
+     * <p>Called before every identify attempt so an operator who corrects a stale
+     * REGISTRATION_TOKEN does not have to restart the server (F4).
+     */
+    public synchronized void reload() {
+        try {
+            if (configFile.isFile()) {
+                Properties fresh = new Properties();
+                try (FileInputStream fis = new FileInputStream(configFile)) {
+                    fresh.load(fis);
+                }
+                properties.clear();
+                properties.putAll(fresh);
+            }
+        } catch (IOException e) {
+            // Keep the values already in memory rather than losing the connection over it.
+        }
+    }
+
     private void load() {
         if (!configFile.exists()) {
             createDefault();
@@ -122,6 +143,15 @@ public class TakaroConfig {
 
     public String getDevRegistrationToken() {
         return properties.getProperty("DEV_REGISTRATION_TOKEN", "");
+    }
+
+    /** How many game events to hold while the connection is down (F13). */
+    public int getEventQueueSize() {
+        try {
+            return Math.max(1, Integer.parseInt(properties.getProperty("EVENT_QUEUE_SIZE", "1000").trim()));
+        } catch (NumberFormatException e) {
+            return 1000;
+        }
     }
 
     public String getCommandPrefix() {
