@@ -4,6 +4,20 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
+## 1.14.6-elimon.2
+
+Found during the live re-proof of `1.14.6-elimon.1` on a real Hytale 0.6.8 server.
+
+### Moderation
+- **F14** - every `takaro <sub>` console helper that takes a player (`banplayer`, `unbanplayer`,
+  `kickplayer`, `getplayerlocation`, `getplayerinventory`, `give`, `tp`, `tpp`, `setcolor`, `beds`)
+  resolved its argument by **online username only**, so `takaro banplayer <uuid>` answered
+  `Player not found` and offline moderation from the console was impossible - exactly the case the
+  new offline `banPlayer` implementation was written for. The argument is now resolved as
+  UUID -> online username -> the `known-players.json` ledger.
+
+---
+
 ## 1.14.6-elimon.1
 
 Fix pass following a hard test of `mad-001/Hytale-Takaro-Integration` @ `ba872f1` against a real

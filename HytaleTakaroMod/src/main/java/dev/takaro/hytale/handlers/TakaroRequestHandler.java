@@ -2990,22 +2990,44 @@ public class TakaroRequestHandler {
         return payload;
     }
 
+    /**
+     * Resolve a console-helper player argument to a Hytale gameId.
+     *
+     * <p>Order (F14): a literal UUID is accepted as-is, then an online player's username, then
+     * the {@link KnownPlayers} ledger. Without the UUID and ledger fallbacks every moderation
+     * helper - {@code takaro banplayer/unbanplayer/kickplayer/getplayerlocation ...} - was
+     * usable only against a player who happened to be online, which is exactly the case where
+     * moderation is not needed.
+     */
     private String getGameIdByName(String playerName) {
         try {
-            com.hypixel.hytale.server.core.universe.Universe universe =
-                com.hypixel.hytale.server.core.universe.Universe.get();
-
-            if (universe == null) {
+            if (playerName == null || playerName.isEmpty()) {
                 return null;
             }
 
-            java.util.Collection<PlayerRef> players = universe.getPlayers();
-            for (PlayerRef player : players) {
-                if (player.getUsername().equalsIgnoreCase(playerName)) {
-                    return player.getUuid().toString();
+            // 1. Already a UUID - offline moderation by id.
+            try {
+                return UUID.fromString(playerName).toString();
+            } catch (IllegalArgumentException notAUuid) {
+                // fall through to the name lookups
+            }
+
+            // 2. An online player's username.
+            com.hypixel.hytale.server.core.universe.Universe universe =
+                com.hypixel.hytale.server.core.universe.Universe.get();
+
+            if (universe != null) {
+                java.util.Collection<PlayerRef> players = universe.getPlayers();
+                for (PlayerRef player : players) {
+                    if (player.getUsername().equalsIgnoreCase(playerName)) {
+                        return player.getUuid().toString();
+                    }
                 }
             }
-            return null;
+
+            // 3. A player the server has seen before.
+            KnownPlayers.Entry known = plugin.getKnownPlayers().getByName(playerName);
+            return known == null ? null : known.gameId;
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error getting gameId by name: " + e.getMessage());
             return null;

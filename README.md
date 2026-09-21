@@ -8,7 +8,7 @@ Built and tested against **Hytale dedicated server 0.6.8**. Java 21+.
 
 ## Status
 
-This fork (`1.14.6-elimon.1`) is the result of a hard test of upstream `mad-001/Hytale-Takaro-Integration`
+This fork (`1.14.6-elimon.2`) is the result of a hard test of upstream `mad-001/Hytale-Takaro-Integration`
 against a real 0.6.8 server, followed by a fix pass. Upstream at `ba872f1` **does not compile** against
 0.6.8 at all, so there is no stock build to compare against.
 
@@ -59,10 +59,10 @@ a real client. Treat the table as "implemented, not yet proven".
 
 ## Install
 
-1. **Get the jar.** Build it (below) or take `HytaleTakaroMod-1.14.6-elimon.1.jar` from a release.
+1. **Get the jar.** Build it (below) or take `HytaleTakaroMod-1.14.6-elimon.2.jar` from a release.
 2. **Drop it in the server's mods folder:**
    ```
-   <server directory>/mods/HytaleTakaroMod-1.14.6-elimon.1.jar
+   <server directory>/mods/HytaleTakaroMod-1.14.6-elimon.2.jar
    ```
    (For a client-hosted world: `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/`.)
 3. **Start the server once.** It creates the config at:
@@ -119,7 +119,7 @@ Needs the Hytale server jar, which is not redistributable and is never committed
 mkdir -p libs
 cp /path/to/HytaleServer.jar libs/HytaleServer.jar
 cd HytaleTakaroMod && mvn clean package
-# -> HytaleTakaroMod/target/HytaleTakaroMod-1.14.6-elimon.1.jar
+# -> HytaleTakaroMod/target/HytaleTakaroMod-1.14.6-elimon.2.jar
 ```
 
 `mvn test` runs the unit tests (argument handling, event queue, ban mapping, response shaping,
