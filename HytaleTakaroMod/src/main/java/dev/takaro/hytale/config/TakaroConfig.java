@@ -55,6 +55,7 @@ public class TakaroConfig {
         properties.setProperty("LOG_FORWARD_LEVEL", "INFO");
         properties.setProperty("LOG_FORWARD_MAX_PER_MIN", "120");
         properties.setProperty("EVENT_QUEUE_SIZE", "1000");
+        properties.setProperty("CATALOG_INCLUDE_DEBUG", "false");
 
         // HytaleCharts integration defaults
         properties.setProperty("HYTALECHARTS_SECRET", "YOUR_SECRET_HERE");
@@ -91,6 +92,8 @@ public class TakaroConfig {
                 writer.write("LOG_FORWARD_LEVEL=INFO\n");
                 writer.write("LOG_FORWARD_MAX_PER_MIN=120\n");
                 writer.write("EVENT_QUEUE_SIZE=1000\n");
+                writer.write("# CATALOG_INCLUDE_DEBUG: include Debug_/Test_/Dev_ entries in listItems and listEntities.\n");
+                writer.write("CATALOG_INCLUDE_DEBUG=false\n");
                 writer.write("\n");
                 writer.write("# HytaleCharts Integration:\n");
                 writer.write("# HYTALECHARTS_SECRET: Get this from hytalecharts.com (generate heartbeat secret)\n");
@@ -166,6 +169,11 @@ public class TakaroConfig {
         } catch (NumberFormatException e) {
             return 1000;
         }
+    }
+
+    /** Include Debug_/Test_/Dev_ entries in listItems and listEntities (F10). */
+    public boolean isCatalogIncludeDebug() {
+        return Boolean.parseBoolean(properties.getProperty("CATALOG_INCLUDE_DEBUG", "false").trim());
     }
 
     /** Trace every WebSocket frame at INFO (F9). */

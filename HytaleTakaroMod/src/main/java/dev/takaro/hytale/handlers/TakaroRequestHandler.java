@@ -24,6 +24,7 @@ import dev.takaro.hytale.api.HytaleApiClient;
 import static dev.takaro.hytale.util.Responses.commandResult;
 import static dev.takaro.hytale.util.Responses.commandName;
 import dev.takaro.hytale.util.TakaroArgs;
+import static dev.takaro.hytale.util.Catalog.isDeveloperAsset;
 import dev.takaro.hytale.state.Bans;
 import dev.takaro.hytale.state.KnownPlayers;
 import com.hypixel.hytale.server.core.modules.accesscontrol.AccessControlModule;
@@ -126,9 +127,10 @@ public class TakaroRequestHandler {
                     responsePayload = handleListBans();
                     break;
                 case "listEntities":
+                    responsePayload = handleListEntities();
+                    break;
                 case "listLocations":
-                    // Not implemented yet
-                    responsePayload = new Object[0];
+                    responsePayload = handleListLocations();
                     break;
                 default:
                     plugin.getLogger().at(java.util.logging.Level.WARNING).log("Unknown action: " + action);
@@ -467,6 +469,16 @@ public class TakaroRequestHandler {
             Object items = handleListItems();
             int size = (items instanceof Collection) ? ((Collection<?>) items).size() : 0;
             return commandResult(true, "Found " + size + " items. Use the Takaro UI to browse the item list.");
+        }
+        if (lower.equals("listentities")) {
+            Object entities = handleListEntities();
+            int size = (entities instanceof Collection) ? ((Collection<?>) entities).size() : 0;
+            return commandResult(true, "Found " + size + " spawnable entity role(s).");
+        }
+        if (lower.equals("listlocations") || lower.equals("warps")) {
+            Object locs = handleListLocations();
+            int size = (locs instanceof Collection) ? ((Collection<?>) locs).size() : 0;
+            return commandResult(true, "Found " + size + " named location(s) (warps).");
         }
         if (lower.equals("listbans")) {
             return commandResult(true, formatBans(handleListBans()));
@@ -1741,6 +1753,9 @@ public class TakaroRequestHandler {
 
             List<Map<String, String>> itemList = new ArrayList<>();
 
+            boolean includeDebug = plugin.getConfig().isCatalogIncludeDebug();
+            int skipped = 0;
+
             for (Map.Entry<String, Item> entry : items.entrySet()) {
                 String code = entry.getKey();
                 if (code == null || code.isEmpty()) continue;
@@ -1748,19 +1763,23 @@ public class TakaroRequestHandler {
                 Item item = entry.getValue();
                 if (item == null) continue;
 
+                // Developer scaffolding is not shop stock. Keep it out unless asked for.
+                if (!includeDebug && isDeveloperAsset(code)) {
+                    skipped++;
+                    continue;
+                }
+
                 try {
-                    String friendlyName = code;
-                    String translationKey = item.getTranslationKey();
-                    if (translationKey != null) {
-                        String i18n = com.hypixel.hytale.server.core.modules.i18n.I18nModule.get().getMessage("en-US", translationKey);
-                        if (i18n != null && !i18n.isEmpty()) {
-                            friendlyName = i18n;
-                        }
-                    }
+                    String friendlyName = translate(item.getTranslationKey(), code);
 
                     Map<String, String> itemInfo = new HashMap<>();
                     itemInfo.put("code", code);
                     itemInfo.put("name", friendlyName);
+                    String description = translate(item.getTranslationKey() == null
+                        ? null : item.getTranslationKey() + ".description", null);
+                    if (description != null) {
+                        itemInfo.put("description", description);
+                    }
                     itemList.add(itemInfo);
                 } catch (Exception e) {
                     Map<String, String> itemInfo = new HashMap<>();
@@ -1770,7 +1789,8 @@ public class TakaroRequestHandler {
                 }
             }
 
-            plugin.getLogger().at(java.util.logging.Level.INFO).log("Successfully returning " + itemList.size() + " items");
+            plugin.getLogger().at(java.util.logging.Level.INFO).log("Successfully returning " + itemList.size()
+                + " items (" + skipped + " developer/debug entries filtered; set CATALOG_INCLUDE_DEBUG=true to keep them)");
             return itemList;
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error listing items: " + e.getMessage());
@@ -2464,6 +2484,142 @@ public class TakaroRequestHandler {
         }
     }
 
+    /** Resolve a translation key to English, or fall back. */
+    private String translate(String translationKey, String fallback) {
+        if (translationKey == null) {
+            return fallback;
+        }
+        try {
+            String text = com.hypixel.hytale.server.core.modules.i18n.I18nModule.get()
+                .getMessage("en-US", translationKey);
+            return (text != null && !text.isEmpty()) ? text : fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    /**
+     * Takaro's listEntities: the spawnable NPC/creature roles, with display names.
+     *
+     * <p>Hytale 0.6.8 has no {@code asset.type.entity} asset map (the item catalogue's
+     * {@code Item.getAssetMap()} has no entity equivalent). The creature catalogue is the NPC
+     * role template system, so that is what is published here.
+     * {@code NPCPlugin.getRoleTemplateNames(true)} returns the SPAWNABLE templates only, which
+     * is what keeps abstract base templates out of the list.
+     */
+    private Object handleListEntities() {
+        try {
+            com.hypixel.hytale.server.npc.NPCPlugin npc = com.hypixel.hytale.server.npc.NPCPlugin.get();
+            if (npc == null) {
+                plugin.getLogger().at(java.util.logging.Level.WARNING).log("listEntities: NPC plugin not available");
+                return new Object[0];
+            }
+
+            boolean includeDebug = plugin.getConfig().isCatalogIncludeDebug();
+            List<Map<String, Object>> entities = new ArrayList<>();
+            int skipped = 0;
+
+            for (String roleName : npc.getRoleTemplateNames(true)) {
+                if (roleName == null || roleName.isEmpty()) {
+                    continue;
+                }
+                if (!includeDebug && isDeveloperAsset(roleName)) {
+                    skipped++;
+                    continue;
+                }
+
+                String displayName = roleName;
+                String description = null;
+                try {
+                    com.hypixel.hytale.server.npc.asset.builder.BuilderInfo info =
+                        npc.getRoleBuilderInfo(npc.getIndex(roleName));
+                    if (info != null && info.getBuilder() instanceof com.hypixel.hytale.server.npc.role.builders.BuilderRole) {
+                        com.hypixel.hytale.server.npc.role.builders.BuilderRole role =
+                            (com.hypixel.hytale.server.npc.role.builders.BuilderRole) info.getBuilder();
+                        String[] names = role.getDisplayNames();
+                        if (names != null && names.length > 0 && names[0] != null && !names[0].isEmpty()) {
+                            displayName = names[0];
+                        }
+                        String shortDescription = role.getShortDescription();
+                        if (shortDescription != null && !shortDescription.isEmpty()) {
+                            description = shortDescription;
+                        }
+                    }
+                } catch (Exception e) {
+                    // Keep the role id as the name rather than dropping the entry.
+                }
+
+                Map<String, Object> entity = new HashMap<>();
+                entity.put("code", roleName);
+                entity.put("name", displayName);
+                entity.put("description", description);
+                // 0.6.8 has no hostile/friendly category field on a role template, so the type
+                // is reported as the only thing that is actually true: it is an NPC role.
+                entity.put("type", "npc");
+                entities.add(entity);
+            }
+
+            plugin.getLogger().at(java.util.logging.Level.INFO).log("listEntities: " + entities.size()
+                + " spawnable role(s), " + skipped + " developer entries filtered");
+            return entities;
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error listing entities: " + e.getMessage());
+            e.printStackTrace();
+            return new Object[0];
+        }
+    }
+
+    /**
+     * Takaro's listLocations: the server's named warps.
+     *
+     * <p>Warps ({@code com.hypixel.hytale.builtin.teleport.TeleportPlugin.getWarps()}) are the
+     * only enumerable named-point store in 0.6.8. There is no point-of-interest, region or
+     * landmark API, and the per-world spawn is a single unnamed WorldConfig value rather than
+     * a list, so neither is included. A server with no warps correctly returns an empty list.
+     */
+    private Object handleListLocations() {
+        try {
+            com.hypixel.hytale.builtin.teleport.TeleportPlugin teleport =
+                com.hypixel.hytale.builtin.teleport.TeleportPlugin.get();
+            if (teleport == null || !teleport.isWarpsLoaded()) {
+                plugin.getLogger().at(java.util.logging.Level.INFO).log("listLocations: warps are not loaded");
+                return new Object[0];
+            }
+
+            List<Map<String, Object>> locations = new ArrayList<>();
+            for (Map.Entry<String, com.hypixel.hytale.builtin.teleport.Warp> entry : teleport.getWarps().entrySet()) {
+                com.hypixel.hytale.builtin.teleport.Warp warp = entry.getValue();
+                if (warp == null) {
+                    continue;
+                }
+
+                Map<String, Object> position = new HashMap<>();
+                com.hypixel.hytale.math.vector.Transform transform = warp.getTransform();
+                if (transform != null && transform.getPosition() != null) {
+                    position.put("x", transform.getPosition().x);
+                    position.put("y", transform.getPosition().y);
+                    position.put("z", transform.getPosition().z);
+                }
+                if (warp.getWorld() != null) {
+                    position.put("dimension", warp.getWorld());
+                }
+
+                Map<String, Object> location = new HashMap<>();
+                location.put("code", entry.getKey());
+                location.put("name", warp.getId() != null ? warp.getId() : entry.getKey());
+                location.put("position", position);
+                locations.add(location);
+            }
+
+            plugin.getLogger().at(java.util.logging.Level.INFO).log("listLocations: " + locations.size() + " warp(s)");
+            return locations;
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error listing locations: " + e.getMessage());
+            e.printStackTrace();
+            return new Object[0];
+        }
+    }
+
     private Map<String, Object> buildHelpResponse() {
         StringBuilder help = new StringBuilder();
         help.append("=== TAKARO API ACTIONS ===\n\n");
@@ -2545,6 +2701,8 @@ public class TakaroRequestHandler {
         help.append("  takaro getplayers                           online players + gameIds\n");
         help.append("  takaro getserverinfo                        server name and version\n");
         help.append("  takaro listitems                            item catalogue size\n");
+        help.append("  takaro listentities                         spawnable entity roles\n");
+        help.append("  takaro listlocations                        named warps\n");
         help.append("  takaro playerlocations                      online players and coordinates\n");
         help.append("  takaro sendmessage <message>                broadcast (supports [red]text[-])\n");
         help.append("  takaro getplayerlocation <player>           a player's coordinates\n");

@@ -13,6 +13,7 @@ import dev.takaro.hytale.api.HytaleApiClient;
 import dev.takaro.hytale.commands.TakaroDebugCommand;
 import dev.takaro.hytale.config.TakaroConfig;
 import dev.takaro.hytale.events.ChatEventListener;
+import dev.takaro.hytale.events.EntityDeathSystem;
 import dev.takaro.hytale.events.PlayerDeathSystem;
 import dev.takaro.hytale.events.PlayerEventListener;
 import dev.takaro.hytale.events.TakaroLogHandler;
@@ -47,6 +48,7 @@ public class TakaroPlugin extends JavaPlugin {
     private ChatEventListener chatListener;
     private PlayerEventListener playerListener;
     private PlayerDeathSystem deathSystem;
+    private EntityDeathSystem entityDeathSystem;
     private TakaroLogHandler logHandler;
     private KnownPlayers knownPlayers;
     private java.util.concurrent.ExecutorService requestExecutor;
@@ -106,6 +108,7 @@ public class TakaroPlugin extends JavaPlugin {
         chatListener = new ChatEventListener(this);
         playerListener = new PlayerEventListener(this);
         deathSystem = new PlayerDeathSystem(this);
+        entityDeathSystem = new EntityDeathSystem(this);
         logHandler = new TakaroLogHandler(this);
 
         // Register events (official pattern)
@@ -164,6 +167,9 @@ public class TakaroPlugin extends JavaPlugin {
             // Register player death system with entity store registry
             this.getEntityStoreRegistry().registerSystem(deathSystem);
             getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerDeathSystem");
+
+            this.getEntityStoreRegistry().registerSystem(entityDeathSystem);
+            getLogger().at(java.util.logging.Level.INFO).log("Registered EntityDeathSystem (entity-killed)");
 
         } catch (Exception e) {
             getLogger().at(java.util.logging.Level.SEVERE).log("Failed to register ECS systems: " + e.getMessage());
