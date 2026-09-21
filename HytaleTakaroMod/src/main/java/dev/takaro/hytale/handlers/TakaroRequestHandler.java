@@ -2579,9 +2579,11 @@ public class TakaroRequestHandler {
                 entity.put("code", roleName);
                 entity.put("name", displayName);
                 entity.put("description", description);
-                // 0.6.8 has no hostile/friendly category field on a role template, so the type
-                // is reported as the only thing that is actually true: it is an NPC role.
-                entity.put("type", "npc");
+                // F17: Takaro validates IEntityDTO.type as an enum - hostile | friendly | neutral -
+                // and rejects the WHOLE listEntities response for any other value ("npc" made the
+                // entity catalogue permanently empty). Hytale 0.6.8 exposes no faction or category
+                // field on a role template, so there is nothing truthful to map onto that enum:
+                // the key is left out, which Takaro accepts as an unknown type.
                 entities.add(entity);
             }
 

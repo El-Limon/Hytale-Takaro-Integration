@@ -4,6 +4,18 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
+## 1.14.6-elimon.4
+
+### Catalogue
+- **F17** - `listEntities` reported `type: "npc"` for every row. Takaro validates
+  `IEntityDTO.type` as an enum (`hostile` | `friendly` | `neutral`) and rejected the entire
+  response with `property type has failed the following constraints: isEnum`, so `syncEntities`
+  ran, the connector answered 450 roles, and Takaro's entity catalogue stayed at **0** rows.
+  Hytale 0.6.8 has no faction or category field on a role template, so the key is now simply
+  omitted rather than invented.
+
+---
+
 ## 1.14.6-elimon.3
 
 ### Moderation
