@@ -49,6 +49,7 @@ public class TakaroPlugin extends JavaPlugin {
     private PlayerDeathSystem deathSystem;
     private TakaroLogHandler logHandler;
     private KnownPlayers knownPlayers;
+    private java.util.concurrent.ExecutorService requestExecutor;
     private ScheduledExecutorService telemetryScheduler;
 
     // HytaleCharts integration
@@ -90,6 +91,16 @@ public class TakaroPlugin extends JavaPlugin {
 
         // Initialize request handler
         requestHandler = new TakaroRequestHandler(this, hytaleApi);
+
+        // Requests run here, never on the WebSocket reader thread.
+        requestExecutor = new java.util.concurrent.ThreadPoolExecutor(
+            2, 8, 60L, TimeUnit.SECONDS,
+            new java.util.concurrent.LinkedBlockingQueue<>(256),
+            r -> {
+                Thread t = new Thread(r, "Takaro-Request");
+                t.setDaemon(true);
+                return t;
+            });
 
         // Initialize event listeners
         chatListener = new ChatEventListener(this);
@@ -439,6 +450,10 @@ public class TakaroPlugin extends JavaPlugin {
             logHandler.stop();
         }
 
+        if (requestExecutor != null) {
+            requestExecutor.shutdownNow();
+        }
+
         if (telemetryScheduler != null) {
             telemetryScheduler.shutdownNow();
         }
@@ -460,8 +475,22 @@ public class TakaroPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * Handle a Takaro request off the WebSocket reader thread.
+     *
+     * <p>Several handlers hand work to a world thread and block on a future while waiting for
+     * the result. Doing that on the reader thread stalls ping/pong and every other request for
+     * the duration; a slow or stuck world would look to Takaro like a dead server. The work is
+     * therefore dispatched to a small bounded pool, and the reader thread returns immediately.
+     */
     public void handleTakaroRequest(TakaroWebSocket sourceWebSocket, String requestId, String action, JsonObject payload) {
-        requestHandler.handleRequest(sourceWebSocket, requestId, action, payload);
+        try {
+            requestExecutor.execute(() -> requestHandler.handleRequest(sourceWebSocket, requestId, action, payload));
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            getLogger().at(java.util.logging.Level.SEVERE).log(
+                "Request executor is saturated, running '" + action + "' inline: " + e.getMessage());
+            requestHandler.handleRequest(sourceWebSocket, requestId, action, payload);
+        }
     }
 
     public TakaroWebSocket getWebSocket() {

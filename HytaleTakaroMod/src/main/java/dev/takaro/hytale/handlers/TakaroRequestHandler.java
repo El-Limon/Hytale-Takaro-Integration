@@ -44,6 +44,8 @@ public class TakaroRequestHandler {
     private final HytaleApiClient hytaleApi;
     private final Gson gson = new Gson();
     private static final int COMMAND_TIMEOUT_SECONDS = 15;
+    private static final int WORLD_TIMEOUT_SECONDS = 5;
+    private static final long SHUTDOWN_GRACE_MS = 1000L;
 
     public TakaroRequestHandler(TakaroPlugin plugin, HytaleApiClient hytaleApi) {
         this.plugin = plugin;
@@ -116,6 +118,9 @@ public class TakaroRequestHandler {
                 case "getPlayerBedLocation":
                 case "getPlayerBeds":
                     responsePayload = handleGetPlayerBedLocation(payload);
+                    break;
+                case "shutdown":
+                    responsePayload = handleShutdown();
                     break;
                 case "listBans":
                     responsePayload = handleListBans();
@@ -232,9 +237,20 @@ public class TakaroRequestHandler {
                 .orElse(null);
 
             if (playerRef == null) {
+                // Not online. Takaro still expects an IGamePlayer for a player the server
+                // knows, so fall back to the known-players ledger instead of failing.
+                KnownPlayers.Entry known = gameId != null
+                    ? plugin.getKnownPlayers().get(gameId)
+                    : plugin.getKnownPlayers().getByName(playerName);
+                if (known != null) {
+                    Map<String, Object> offline = plugin.getKnownPlayers().toGamePlayer(known.gameId);
+                    offline.put("online", false);
+                    return offline;
+                }
+
                 Map<String, Object> error = new HashMap<>();
                 error.put("success", false);
-                error.put("error", "Player not found");
+                error.put("error", "Player not found (never seen by this server)");
                 return error;
             }
 
@@ -256,7 +272,9 @@ public class TakaroRequestHandler {
                 // Keep default 127.0.0.1
             }
             playerData.put("ip", ipAddress);
+            playerData.put("online", true);
 
+            plugin.getKnownPlayers().record(uuid, playerRef.getUsername(), "hytale:" + uuid, ipAddress);
             return playerData;
 
         } catch (Exception e) {
@@ -498,16 +516,9 @@ public class TakaroRequestHandler {
             return handleTeleportPlayerToPlayerConsoleCommand("tpp " + sub.split("\\s+", 2)[1]);
         }
         if (lower.equals("shutdown") || lower.equals("stop")) {
-            final String cmd = lower;
-            new Thread(() -> {
-                try {
-                    Thread.sleep(1000); // let the response go out first
-                    HytaleServer.get().getCommandManager().handleCommand(ConsoleSender.INSTANCE, cmd).join();
-                } catch (Exception e) {
-                    plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error executing delayed shutdown: " + e.getMessage());
-                }
-            }, "Takaro-Shutdown").start();
-            return commandResult(true, "Server shutdown initiated");
+            Map<String, Object> r = asMap(handleShutdown());
+            boolean ok = Boolean.TRUE.equals(r.get("success"));
+            return commandResult(ok, ok ? String.valueOf(r.get("rawResult")) : String.valueOf(r.get("error")));
         }
 
         return commandResult(false, "Unknown takaro sub-command: " + sub + "\nType 'takaro help' for the list.");
@@ -952,52 +963,48 @@ public class TakaroRequestHandler {
         return null;
     }
 
+    /**
+     * A player's position.
+     *
+     * <p>Every failure path used to return {@code {x:0,y:0,z:0}}, which is a real coordinate
+     * in a Hytale world: Takaro could not tell "the player is at the origin" from "we could
+     * not read the position". Failures now return an explicit error instead.
+     */
     private Object handleGetPlayerLocation(JsonObject payload) {
         try {
             TakaroArgs args = TakaroArgs.of(payload);
             String gameId = args.playerGameId();
             if (gameId == null) {
-                Map<String, Object> result = new HashMap<>();
-                result.put("x", 0);
-                result.put("y", 0);
-                result.put("z", 0);
-                return result;
+                return errorResult("No gameId or playerId provided");
             }
 
             plugin.getLogger().at(java.util.logging.Level.FINE).log("Getting player location: " + gameId);
 
             com.hypixel.hytale.server.core.universe.Universe universe =
                 com.hypixel.hytale.server.core.universe.Universe.get();
-
             if (universe == null) {
-                Map<String, Object> result = new HashMap<>();
-                result.put("x", 0);
-                result.put("y", 0);
-                result.put("z", 0);
-                return result;
+                return errorResult("Universe is not available");
             }
 
-            UUID playerUuid = UUID.fromString(gameId);
+            UUID playerUuid;
+            try {
+                playerUuid = UUID.fromString(gameId);
+            } catch (IllegalArgumentException e) {
+                return errorResult("gameId is not a Hytale UUID: " + gameId);
+            }
+
             PlayerRef playerRef = universe.getPlayers().stream()
                 .filter(p -> p.getUuid().equals(playerUuid))
                 .findFirst()
                 .orElse(null);
 
             if (playerRef == null) {
-                Map<String, Object> result = new HashMap<>();
-                result.put("x", 0);
-                result.put("y", 0);
-                result.put("z", 0);
-                return result;
+                return errorResult("Player is not online: " + gameId);
             }
 
             Ref<EntityStore> ref = playerRef.getReference();
             if (ref == null || !ref.isValid()) {
-                Map<String, Object> result = new HashMap<>();
-                result.put("x", 0);
-                result.put("y", 0);
-                result.put("z", 0);
-                return result;
+                return errorResult("Player is not in a world: " + gameId);
             }
 
             Store<EntityStore> store = ref.getStore();
@@ -1005,18 +1012,15 @@ public class TakaroRequestHandler {
 
             CompletableFuture<Map<String, Object>> future = new CompletableFuture<>();
 
+            // Reading a component must happen on that world's own thread. Keep the work there
+            // to the single component read and hand the result back through the future.
             world.execute(() -> {
                 try {
                     TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
                     if (transform == null) {
-                        Map<String, Object> result = new HashMap<>();
-                        result.put("x", 0);
-                        result.put("y", 0);
-                        result.put("z", 0);
-                        future.complete(result);
+                        future.complete(errorResult("Player has no transform component"));
                         return;
                     }
-
                     Vector3d position = transform.getPosition();
                     Map<String, Object> result = new HashMap<>();
                     result.put("x", position.x);
@@ -1025,27 +1029,68 @@ public class TakaroRequestHandler {
                     future.complete(result);
                 } catch (Exception e) {
                     plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error getting position: " + e.getMessage());
-                    e.printStackTrace();
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("x", 0);
-                    result.put("y", 0);
-                    result.put("z", 0);
-                    future.complete(result);
+                    future.complete(errorResult("Error reading position: " + e.getMessage()));
                 }
             });
 
-            Map<String, Object> result = future.get(5, TimeUnit.SECONDS);
-            plugin.getLogger().at(java.util.logging.Level.FINE).log("Player location: " + result.get("x") + "," + result.get("y") + "," + result.get("z"));
-            return result;
+            try {
+                return future.get(WORLD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                return errorResult("Timed out waiting for the world thread");
+            }
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error handling getPlayerLocation: " + e.getMessage());
             e.printStackTrace();
-            Map<String, Object> result = new HashMap<>();
-            result.put("x", 0);
-            result.put("y", 0);
-            result.put("z", 0);
+            return errorResult(String.valueOf(e.getMessage()));
+        }
+    }
+
+    /** Stop the server through its own shutdown path, after the response has been sent. */
+    private Object handleShutdown() {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            if (HytaleServer.get() == null) {
+                result.put("success", false);
+                result.put("error", "Server is not available");
+                return result;
+            }
+            if (HytaleServer.get().isShuttingDown()) {
+                result.put("success", true);
+                result.put("rawResult", "Server is already shutting down");
+                return result;
+            }
+
+            // HytaleServer.shutdownServer() is what /stop calls: it flips an idempotent flag
+            // and runs the teardown on its own non-daemon ShutdownThread. Delay it briefly so
+            // this response reaches Takaro before the socket goes away.
+            Thread trigger = new Thread(() -> {
+                try {
+                    Thread.sleep(SHUTDOWN_GRACE_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                plugin.getLogger().at(java.util.logging.Level.INFO).log("Takaro requested shutdown - stopping server");
+                HytaleServer.get().shutdownServer();
+            }, "Takaro-Shutdown");
+            trigger.setDaemon(true);
+            trigger.start();
+
+            result.put("success", true);
+            result.put("rawResult", "Server shutdown initiated");
+            return result;
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error handling shutdown: " + e.getMessage());
+            result.put("success", false);
+            result.put("error", e.getMessage());
             return result;
         }
+    }
+
+    private static Map<String, Object> errorResult(String message) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", false);
+        result.put("error", message);
+        return result;
     }
 
     private Object handleTeleportPlayerToPlayer(JsonObject payload) {
@@ -1363,8 +1408,7 @@ public class TakaroRequestHandler {
             TakaroArgs args = TakaroArgs.of(payload);
             String gameId = args.playerGameId();
             if (gameId == null) {
-                plugin.getLogger().at(java.util.logging.Level.WARNING).log("No gameId or playerId provided");
-                return new Object[0];
+                return errorResult("No gameId or playerId provided");
             }
 
             plugin.getLogger().at(java.util.logging.Level.FINE).log("Getting player inventory for gameId: " + gameId);
@@ -1381,14 +1425,13 @@ public class TakaroRequestHandler {
         }
 
         if (playerRef == null) {
-            plugin.getLogger().at(java.util.logging.Level.WARNING).log("Player not found: " + gameId);
-            return new Object[0];
+            // An empty inventory and "we could not read the inventory" are different answers.
+            return errorResult("Player is not online: " + gameId);
         }
 
         Ref<EntityStore> ref = playerRef.getReference();
         if (ref == null || !ref.isValid()) {
-            plugin.getLogger().at(java.util.logging.Level.WARNING).log("Player reference not valid: " + gameId);
-            return new Object[0];
+            return errorResult("Player is not in a world: " + gameId);
         }
 
         Store<EntityStore> store = ref.getStore();
@@ -1402,8 +1445,7 @@ public class TakaroRequestHandler {
             try {
                 Player player = store.getComponent(ref, Player.getComponentType());
                 if (player == null) {
-                    plugin.getLogger().at(java.util.logging.Level.WARNING).log("Player component not found: " + gameId);
-                    future.complete(null);
+                    future.completeExceptionally(new IllegalStateException("Player component not found"));
                     return;
                 }
 
@@ -1471,16 +1513,20 @@ public class TakaroRequestHandler {
 
             // Wait for world thread to complete
             try {
-                future.get(5, TimeUnit.SECONDS);
+                future.get(WORLD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                return errorResult("Timed out waiting for the world thread");
             } catch (Exception e) {
-                plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Timeout waiting for inventory: " + e.getMessage());
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error reading inventory: " + cause.getMessage());
+                return errorResult("Could not read inventory: " + cause.getMessage());
             }
 
             return inventoryItems.toArray(new Object[0]);
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error parsing getPlayerInventory payload: " + e.getMessage());
             e.printStackTrace();
-            return new Object[0];
+            return errorResult(String.valueOf(e.getMessage()));
         }
     }
 
