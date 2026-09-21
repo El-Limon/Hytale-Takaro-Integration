@@ -2589,21 +2589,23 @@ public class TakaroRequestHandler {
      * @return the display name, or {@code null} when the game has no translation for this role
      */
     private String translateRoleName(String roleName) {
-        String key = dev.takaro.hytale.util.Catalog.roleNameKey(roleName);
-        try {
-            String translated = com.hypixel.hytale.server.core.util.MessageUtil.formatMessageToPlainString(
-                com.hypixel.hytale.server.core.Message.translation(key).getFormattedMessage());
-            if (translated == null) {
-                return null;
+        for (String key : dev.takaro.hytale.util.Catalog.roleNameKeys(roleName)) {
+            try {
+                String translated = com.hypixel.hytale.server.core.util.MessageUtil.formatMessageToPlainString(
+                    com.hypixel.hytale.server.core.Message.translation(key).getFormattedMessage());
+                if (translated == null) {
+                    continue;
+                }
+                translated = translated.trim();
+                if (translated.isEmpty() || translated.equals(key)) {
+                    continue;
+                }
+                return translated;
+            } catch (Exception e) {
+                // Try the next key form.
             }
-            translated = translated.trim();
-            if (translated.isEmpty() || translated.equals(key)) {
-                return null;
-            }
-            return translated;
-        } catch (Exception e) {
-            return null;
         }
+        return null;
     }
 
     private Object handleListEntities() {

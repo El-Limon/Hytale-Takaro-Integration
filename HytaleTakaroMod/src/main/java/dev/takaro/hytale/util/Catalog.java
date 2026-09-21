@@ -28,11 +28,18 @@ public final class Catalog {
      *
      * <p>Found in {@code Server/Languages/en-US/server.lang} inside {@code Assets.zip} (and in
      * {@code bundledDefaults/server.lang} inside the server jar): 574 entries of the form
-     * {@code npcRoles.Bat_Ice.name = Ice Bat}, {@code npcRoles.Cow_Calf.name = Calf}.
+     * {@code npcRoles.Bat_Ice.name = Ice Bat}, {@code npcRoles.Cow_Calf.name = Calf}, which
+     * I18nModule registers under the file-name prefix as {@code server.npcRoles.Bat_Ice.name}.
      * {@code BuilderRole.getDisplayNames()} does not carry them.
      */
-    public static String roleNameKey(String code) {
-        return "npcRoles." + code + ".name";
+    public static java.util.List<String> roleNameKeys(String code) {
+        // I18nModule prefixes every key with the .lang file's own name, so the key that
+        // server.lang's `npcRoles.Bat_Ice.name` is actually registered under at runtime is
+        // `server.npcRoles.Bat_Ice.name` (the same way HelpCommand asks for
+        // `server.commands.help.console.header` for a line written as
+        // `commands.help.console.header`). The unprefixed form is tried too, in case a future
+        // asset pack ships the table under a different file name.
+        return java.util.List.of("server.npcRoles." + code + ".name", "npcRoles." + code + ".name");
     }
 
     /**

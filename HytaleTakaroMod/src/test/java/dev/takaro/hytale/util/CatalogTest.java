@@ -41,7 +41,9 @@ class CatalogTest {
 
     @Test
     void buildsTheRoleTranslationKeyHytaleUses() {
-        assertEquals("npcRoles.Bat_Ice.name", Catalog.roleNameKey("Bat_Ice"));
+        assertEquals(
+            java.util.List.of("server.npcRoles.Bat_Ice.name", "npcRoles.Bat_Ice.name"),
+            Catalog.roleNameKeys("Bat_Ice"));
     }
 
     @Test
