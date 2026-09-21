@@ -21,6 +21,8 @@ import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.takaro.hytale.TakaroPlugin;
 import dev.takaro.hytale.api.HytaleApiClient;
+import static dev.takaro.hytale.util.Responses.commandResult;
+import static dev.takaro.hytale.util.Responses.commandName;
 
 import java.io.IOException;
 import java.util.*;
@@ -34,6 +36,7 @@ public class TakaroRequestHandler {
     private final TakaroPlugin plugin;
     private final HytaleApiClient hytaleApi;
     private final Gson gson = new Gson();
+    private static final int COMMAND_TIMEOUT_SECONDS = 15;
 
     public TakaroRequestHandler(TakaroPlugin plugin, HytaleApiClient hytaleApi) {
         this.plugin = plugin;
@@ -522,14 +525,6 @@ public class TakaroRequestHandler {
         return commandResult(false, "Unknown takaro sub-command: " + sub + "\nType 'takaro help' for the list.");
     }
 
-    /** Build the {success, rawResult} shape Takaro's CommandOutput DTO requires. */
-    static Map<String, Object> commandResult(boolean success, String rawResult) {
-        Map<String, Object> result = new HashMap<>();
-        result.put("success", success);
-        result.put("rawResult", rawResult == null ? "" : rawResult);
-        return result;
-    }
-
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object o) {
         return (o instanceof Map) ? (Map<String, Object>) o : new HashMap<>();
@@ -552,31 +547,29 @@ public class TakaroRequestHandler {
         return sb.toString().trim();
     }
 
-    /** Run a real Hytale console command and return its output as a string. */
+    /**
+     * Run a real Hytale console command and return its own output.
+     *
+     * <p>The output is captured per invocation through a dedicated {@link OutputCapturingCommandSender}
+     * rather than by subscribing to the global server logger, so concurrent server activity can no
+     * longer be returned as this command's output (F7).
+     *
+     * <p>An unrecognised command is reported as {@code success:false} carrying the game's own
+     * message, instead of the former unconditional {@code success:true} (F8).
+     */
     private Map<String, Object> runHytaleCommand(String command) throws Exception {
-        CopyOnWriteArrayList<LogRecord> logCapture = new CopyOnWriteArrayList<>();
-        HytaleLoggerBackend.subscribe(logCapture);
+        boolean known = HytaleServer.get().getCommandManager().resolveCommand(commandName(command)) != null;
 
-        try {
-            HytaleServer.get().getCommandManager().handleCommand(ConsoleSender.INSTANCE, command).join();
-            Thread.sleep(500); // give async messages time to arrive
-        } finally {
-            HytaleLoggerBackend.unsubscribe(logCapture);
-        }
+        OutputCapturingCommandSender sender = new OutputCapturingCommandSender();
+        HytaleServer.get().getCommandManager()
+            .handleCommand(sender, command)
+            .get(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-        StringBuilder output = new StringBuilder();
-        for (LogRecord record : logCapture) {
-            String message = record.getMessage();
-            if (message != null && !message.isEmpty()) {
-                output.append(message).append("\n");
-            }
+        String output = sender.getCapturedOutput().trim();
+        if (output.isEmpty()) {
+            output = known ? "Command executed (no output)" : "Command not found: " + commandName(command);
         }
-
-        String outputStr = output.toString().trim();
-        if (outputStr.isEmpty()) {
-            outputStr = "Command executed (no output)";
-        }
-        return commandResult(true, outputStr);
+        return commandResult(known, output);
     }
 
     private Object handleGiveItem(JsonObject payload) {
