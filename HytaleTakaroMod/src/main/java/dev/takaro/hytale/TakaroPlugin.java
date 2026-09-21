@@ -17,6 +17,7 @@ import dev.takaro.hytale.events.PlayerDeathSystem;
 import dev.takaro.hytale.events.PlayerEventListener;
 import dev.takaro.hytale.events.TakaroLogHandler;
 import dev.takaro.hytale.handlers.TakaroRequestHandler;
+import dev.takaro.hytale.state.KnownPlayers;
 import dev.takaro.hytale.websocket.TakaroWebSocket;
 
 import javax.annotation.Nonnull;
@@ -47,6 +48,7 @@ public class TakaroPlugin extends JavaPlugin {
     private PlayerEventListener playerListener;
     private PlayerDeathSystem deathSystem;
     private TakaroLogHandler logHandler;
+    private KnownPlayers knownPlayers;
     private ScheduledExecutorService telemetryScheduler;
 
     // HytaleCharts integration
@@ -69,6 +71,10 @@ public class TakaroPlugin extends JavaPlugin {
         // Load configuration - store in HytaleTakaroMod subfolder
         File configFile = getFile().getParent().resolve("HytaleTakaroMod").resolve("TakaroConfig.properties").toFile();
         config = new TakaroConfig(configFile);
+
+        // Ledger of players this server has seen, so offline lookups and listBans can
+        // answer with a real name instead of nothing.
+        knownPlayers = new KnownPlayers(configFile.toPath().resolveSibling("known-players.json"));
 
         // Initialize Hytale API client (hidden feature - optional)
         hytaleApi = new HytaleApiClient(this, config.getHytaleApiUrl());
@@ -464,6 +470,10 @@ public class TakaroPlugin extends JavaPlugin {
 
     public TakaroWebSocket getDevWebSocket() {
         return devWebSocket;
+    }
+
+    public KnownPlayers getKnownPlayers() {
+        return knownPlayers;
     }
 
     public TakaroConfig getConfig() {

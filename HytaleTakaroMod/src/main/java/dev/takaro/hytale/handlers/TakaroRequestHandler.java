@@ -24,6 +24,12 @@ import dev.takaro.hytale.api.HytaleApiClient;
 import static dev.takaro.hytale.util.Responses.commandResult;
 import static dev.takaro.hytale.util.Responses.commandName;
 import dev.takaro.hytale.util.TakaroArgs;
+import dev.takaro.hytale.state.Bans;
+import dev.takaro.hytale.state.KnownPlayers;
+import com.hypixel.hytale.server.core.modules.accesscontrol.AccessControlModule;
+import com.hypixel.hytale.server.core.modules.accesscontrol.ban.Ban;
+
+import java.time.Instant;
 
 import java.io.IOException;
 import java.util.*;
@@ -112,6 +118,8 @@ public class TakaroRequestHandler {
                     responsePayload = handleGetPlayerBedLocation(payload);
                     break;
                 case "listBans":
+                    responsePayload = handleListBans();
+                    break;
                 case "listEntities":
                 case "listLocations":
                     // Not implemented yet
@@ -442,6 +450,9 @@ public class TakaroRequestHandler {
             int size = (items instanceof Collection) ? ((Collection<?>) items).size() : 0;
             return commandResult(true, "Found " + size + " items. Use the Takaro UI to browse the item list.");
         }
+        if (lower.equals("listbans")) {
+            return commandResult(true, formatBans(handleListBans()));
+        }
         if (lower.equals("playerlocations") || lower.equals("locations") || lower.equals("whereis")) {
             return buildPlayerLocationsResponse();
         }
@@ -733,20 +744,212 @@ public class TakaroRequestHandler {
         }
     }
 
+    /**
+     * Ban a player for real, using Hytale's own access-control module.
+     *
+     * <p>Works for offline players because {@code AccessControlModule.ban(Ban)} is purely
+     * UUID-based: it writes the entry through the ban provider (persisted to {@code bans.json})
+     * and disconnects the target if they happen to be online. Honours {@code expiresAt}.
+     *
+     * <p>Per the no-overclaim rule the ban is read back from the provider before success is
+     * reported: if {@code isBanned(uuid)} is false afterwards, this returns success:false.
+     */
     private Object handleBanPlayer(JsonObject payload) {
-        // TODO: Implement player ban
-        plugin.getLogger().at(java.util.logging.Level.INFO).log("Banning player: " + payload.toString());
-        Map<String, Boolean> result = new HashMap<>();
-        result.put("success", true);
-        return result;
+        Map<String, Object> result = new HashMap<>();
+        try {
+            TakaroArgs args = TakaroArgs.of(payload);
+            String gameId = args.playerGameId();
+            if (gameId == null) {
+                // Allow banning by name for a player the server has seen before.
+                String name = args.playerName();
+                KnownPlayers.Entry known = name == null ? null : plugin.getKnownPlayers().getByName(name);
+                gameId = known == null ? null : known.gameId;
+            }
+            if (gameId == null) {
+                result.put("success", false);
+                result.put("error", "No gameId or playerId provided");
+                return result;
+            }
+
+            UUID target;
+            try {
+                target = UUID.fromString(gameId);
+            } catch (IllegalArgumentException e) {
+                result.put("success", false);
+                result.put("error", "gameId is not a Hytale UUID: " + gameId);
+                return result;
+            }
+
+            String rawExpiry = args.str("expiresAt");
+            if (Bans.isUnparseableExpiry(rawExpiry)) {
+                result.put("success", false);
+                result.put("error", "Could not parse expiresAt: " + rawExpiry);
+                return result;
+            }
+            Instant expiresOn = Bans.parseExpiresAt(rawExpiry);
+            String reason = args.nonBlank("reason", "Banned by Takaro");
+
+            // Remember the name now so listBans and getPlayer can report it later.
+            String name = args.playerName();
+            if (name == null) {
+                name = onlinePlayerName(target);
+            }
+            if (name != null) {
+                plugin.getKnownPlayers().record(gameId, name, "hytale:" + gameId, null);
+            }
+
+            AccessControlModule access = AccessControlModule.get();
+            if (access == null) {
+                result.put("success", false);
+                result.put("error", "Hytale access control module is not available");
+                return result;
+            }
+
+            Ban ban = new Ban(target, ConsoleSender.INSTANCE.getUuid(), Instant.now(), expiresOn, reason);
+            access.ban(ban);
+
+            // Read the state back before answering.
+            boolean stored = access.isBanned(target);
+            result.put("success", stored);
+            if (!stored) {
+                result.put("error", "Hytale did not store the ban (expiry already in the past?)");
+            }
+            plugin.getLogger().at(java.util.logging.Level.INFO).log(
+                "banPlayer " + gameId + " reason='" + reason + "' expiresAt=" + expiresOn + " stored=" + stored);
+            return result;
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error banning player: " + e.getMessage());
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
     }
 
+    /** Remove a ban, then verify it is really gone before reporting success. */
     private Object handleUnbanPlayer(JsonObject payload) {
-        // TODO: Implement player unban
-        plugin.getLogger().at(java.util.logging.Level.INFO).log("Unbanning player: " + payload.toString());
-        Map<String, Boolean> result = new HashMap<>();
-        result.put("success", true);
-        return result;
+        Map<String, Object> result = new HashMap<>();
+        try {
+            TakaroArgs args = TakaroArgs.of(payload);
+            String gameId = args.playerGameId();
+            if (gameId == null) {
+                String name = args.playerName();
+                KnownPlayers.Entry known = name == null ? null : plugin.getKnownPlayers().getByName(name);
+                gameId = known == null ? null : known.gameId;
+            }
+            if (gameId == null) {
+                result.put("success", false);
+                result.put("error", "No gameId or playerId provided");
+                return result;
+            }
+
+            UUID target;
+            try {
+                target = UUID.fromString(gameId);
+            } catch (IllegalArgumentException e) {
+                result.put("success", false);
+                result.put("error", "gameId is not a Hytale UUID: " + gameId);
+                return result;
+            }
+
+            AccessControlModule access = AccessControlModule.get();
+            if (access == null) {
+                result.put("success", false);
+                result.put("error", "Hytale access control module is not available");
+                return result;
+            }
+
+            boolean wasBanned = access.isBanned(target);
+            access.unban(target);
+            boolean stillBanned = access.isBanned(target);
+
+            result.put("success", !stillBanned);
+            if (stillBanned) {
+                result.put("error", "Hytale still reports the player as banned");
+            } else if (!wasBanned) {
+                // Idempotent, but say so rather than implying something was removed.
+                result.put("note", "Player was not banned");
+            }
+            plugin.getLogger().at(java.util.logging.Level.INFO).log(
+                "unbanPlayer " + gameId + " wasBanned=" + wasBanned + " stillBanned=" + stillBanned);
+            return result;
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error unbanning player: " + e.getMessage());
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
+    }
+
+    /** Takaro's listBans: [{player:{gameId,name,platformId}, reason, expiresAt}]. */
+    private Object handleListBans() {
+        try {
+            AccessControlModule access = AccessControlModule.get();
+            if (access == null || access.getBanProvider() == null) {
+                plugin.getLogger().at(java.util.logging.Level.WARNING).log(
+                    "listBans: Hytale access control module is not available");
+                return new Object[0];
+            }
+
+            List<Map<String, Object>> bans = new ArrayList<>();
+            for (Ban ban : access.getBanProvider().getBans()) {
+                if (ban == null || ban.getTarget() == null) {
+                    continue;
+                }
+                String gameId = ban.getTarget().toString();
+                // Hytale's ban entries hold no name, so it comes from our own ledger.
+                String name = plugin.getKnownPlayers().nameOf(gameId);
+                if (name == null) {
+                    name = onlinePlayerName(ban.getTarget());
+                }
+                bans.add(Bans.toIBan(gameId, name, ban.getReason(), ban.getExpiresOn()));
+            }
+            plugin.getLogger().at(java.util.logging.Level.INFO).log("listBans: " + bans.size() + " ban(s)");
+            return bans;
+        } catch (Exception e) {
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error listing bans: " + e.getMessage());
+            e.printStackTrace();
+            return new Object[0];
+        }
+    }
+
+    /** Human-readable ban list for the 'takaro listbans' console helper. */
+    @SuppressWarnings("unchecked")
+    private String formatBans(Object bans) {
+        if (!(bans instanceof Collection) || ((Collection<?>) bans).isEmpty()) {
+            return "No bans";
+        }
+        StringBuilder sb = new StringBuilder("=== BANS ===\n");
+        for (Map<String, Object> ban : (Collection<Map<String, Object>>) bans) {
+            Map<String, Object> player = (Map<String, Object>) ban.get("player");
+            Object expires = ban.get("expiresAt");
+            sb.append(String.format("%-22s %-38s until=%s reason=%s%n",
+                player.get("name") == null ? "(unknown name)" : player.get("name"),
+                player.get("gameId"),
+                expires == null ? "never" : expires,
+                ban.get("reason")));
+        }
+        return sb.toString().trim();
+    }
+
+    /** The username of an online player, or null. */
+    private String onlinePlayerName(UUID uuid) {
+        try {
+            com.hypixel.hytale.server.core.universe.Universe universe =
+                com.hypixel.hytale.server.core.universe.Universe.get();
+            if (universe == null) {
+                return null;
+            }
+            for (PlayerRef p : universe.getPlayers()) {
+                if (uuid.equals(p.getUuid())) {
+                    return p.getUsername();
+                }
+            }
+        } catch (Exception ignored) {
+            // best effort only
+        }
+        return null;
     }
 
     private Object handleGetPlayerLocation(JsonObject payload) {
@@ -2247,11 +2450,11 @@ public class TakaroRequestHandler {
         help.append("   Description: Kick a player from the server\n");
         help.append("   Payload: {\"args\": \"{\\\"gameId\\\":\\\"uuid\\\",\\\"reason\\\":\\\"kicked\\\"}\"}\n\n");
 
-        help.append("8. banPlayer (not implemented)\n");
-        help.append("   Description: Ban a player\n");
-        help.append("   Payload: {\"args\": \"{\\\"gameId\\\":\\\"uuid\\\"}\"}\n\n");
+        help.append("8. banPlayer\n");
+        help.append("   Description: Ban a player (works offline; honours expiresAt)\n");
+        help.append("   Payload: {\"args\": \"{\\\"gameId\\\":\\\"uuid\\\",\\\"reason\\\":\\\"griefing\\\",\\\"expiresAt\\\":\\\"2026-12-31T23:59:59Z\\\"}\"}\n\n");
 
-        help.append("9. unbanPlayer (not implemented)\n");
+        help.append("9. unbanPlayer\n");
         help.append("   Description: Unban a player\n");
         help.append("   Payload: {\"args\": \"{\\\"gameId\\\":\\\"uuid\\\"}\"}\n\n");
 
@@ -2306,6 +2509,7 @@ public class TakaroRequestHandler {
         help.append("  takaro tpp <player> <targetPlayer>          teleport to a player\n");
         help.append("  takaro setcolor <player> <color>            chat name colour\n");
         help.append("  takaro kickplayer <player> [reason]         kick\n");
+        help.append("  takaro listbans                             active bans\n");
         help.append("  takaro banplayer <player>                   ban\n");
         help.append("  takaro unbanplayer <player>                 unban\n");
         help.append("  takaro shutdown                             stop the server\n\n");
@@ -2388,18 +2592,26 @@ public class TakaroRequestHandler {
         // banPlayer
         Map<String, Object> banPlayer = new HashMap<>();
         banPlayer.put("action", "banPlayer");
-        banPlayer.put("description", "Ban a player (not implemented yet)");
-        banPlayer.put("payload", "{\"args\": \"{\\\"gameId\\\":\\\"player-uuid\\\"}\"}");
+        banPlayer.put("description", "Ban a player by gameId. Works for offline players and honours an optional ISO-8601 expiresAt.");
+        banPlayer.put("payload", "{\"args\": \"{\\\"gameId\\\":\\\"player-uuid\\\",\\\"reason\\\":\\\"griefing\\\",\\\"expiresAt\\\":\\\"2026-12-31T23:59:59Z\\\"}\"}");
         banPlayer.put("returns", "{\"success\": true}");
         actions.add(banPlayer);
 
         // unbanPlayer
         Map<String, Object> unbanPlayer = new HashMap<>();
         unbanPlayer.put("action", "unbanPlayer");
-        unbanPlayer.put("description", "Unban a player (not implemented yet)");
+        unbanPlayer.put("description", "Remove a player's ban by gameId");
         unbanPlayer.put("payload", "{\"args\": \"{\\\"gameId\\\":\\\"player-uuid\\\"}\"}");
         unbanPlayer.put("returns", "{\"success\": true}");
         actions.add(unbanPlayer);
+
+        // listBans
+        Map<String, Object> listBans = new HashMap<>();
+        listBans.put("action", "listBans");
+        listBans.put("description", "List every active ban");
+        listBans.put("payload", "{}");
+        listBans.put("returns", "[{\"player\": {\"gameId\": \"uuid\", \"name\": \"PlayerName\", \"platformId\": \"hytale:uuid\"}, \"reason\": \"griefing\", \"expiresAt\": null}]");
+        actions.add(listBans);
 
         // getPlayerLocation
         Map<String, Object> getPlayerLocation = new HashMap<>();

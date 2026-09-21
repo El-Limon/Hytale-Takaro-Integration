@@ -2,9 +2,7 @@ package dev.takaro.hytale.events;
 
 import com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
-import com.hypixel.hytale.server.core.io.netty.NettyUtil;
 import dev.takaro.hytale.TakaroPlugin;
-import io.netty.channel.Channel;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -45,6 +43,9 @@ public class PlayerEventListener {
             }
 
             plugin.getLogger().at(java.util.logging.Level.INFO).log("[EVENT] Player connected: " + playerName + " from " + ipAddress);
+
+            // Remember the player so offline getPlayer / listBans can name them later.
+            plugin.getKnownPlayers().record(uuid, playerName, "hytale:" + uuid, ipAddress);
 
             // Build connect event for Takaro
             Map<String, Object> eventData = new HashMap<>();
