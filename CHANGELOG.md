@@ -4,6 +4,77 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
+## 1.14.6-elimon.1
+
+Fix pass following a hard test of `mad-001/Hytale-Takaro-Integration` @ `ba872f1` against a real
+Hytale **0.6.8** dedicated server. **None of these fixes has been re-proven live yet** - see the
+status table in the README.
+
+### Compatibility
+- Compiles against Hytale 0.6.8 again. Upstream's last functional commit (2026-01-31) failed with
+  72 javac errors across 24 call sites: `org.joml` vectors replacing `com.hypixel.hytale.math.vector`,
+  `Universe.getPlayers()` returning a `Collection`, `PacketHandler.getChannel()` returning a
+  `ChannelConnection`, `disconnect(Message)`, `Teleport`'s `Rotation3fc` rotation,
+  `CommandSender.getUsername()`, and the removal of `Inventory.getCombinedEverything()`.
+- `getPlayerInventory` covers all six inventory sections again (armor, hotbar, utility, storage,
+  backpack, tools) by building a `CombinedItemContainer` explicitly.
+- Manifest `ServerVersion` is now `>=0.6.8` and matches the pom version.
+
+### Moderation
+- `banPlayer` / `unbanPlayer` were stubs that always returned `success:true`; `listBans` returned `[]`.
+  All three are now real, on Hytale's `AccessControlModule`: offline bans by UUID, `expiresAt` honoured,
+  the target kicked if online, and the state read back before success is reported.
+- `shutdown` is handled (it previously fell through to "Unknown action").
+
+### Correctness
+- `executeConsoleCommand` always returns a string `rawResult`. Six shortcut names used to return the
+  raw action payload, which Takaro rejected with a 400.
+- Takaro's console helpers moved to a `takaro <sub>` namespace so they can no longer shadow real
+  Hytale commands.
+- Console output is captured per invocation via a capturing `CommandSender` instead of subscribing to
+  the global server logger, so another user's output can no longer be returned as yours.
+- An unknown console command now returns `success:false` with the game's own message.
+- Every optional argument goes through one null-safe helper: an explicit JSON `null` from a module no
+  longer throws. `giveItem` honours `amount` and reports an unsettable `quality` instead of dropping it.
+- `getPlayerLocation` no longer answers `0,0,0` on failure, and `getPlayerInventory` no longer answers
+  `[]` on failure.
+- `getPlayer` answers for offline players from a persisted known-players ledger.
+- `getServerInfo` reports the real MOTD, version and player counts.
+
+### Reliability
+- Game events produced while Takaro is unreachable are queued (`EVENT_QUEUE_SIZE`, default 1000) and
+  flushed after re-identify, instead of being dropped. Oldest-first drop with a logged counter.
+- A rejected identify is retried with backoff and the real reason is logged, instead of silently ending
+  all reconnect attempts. The config file is re-read before every attempt.
+- Connection logging reflects reality (socket-open vs identified).
+- Requests run on their own bounded pool, not on the WebSocket reader thread.
+- The disconnect-dedupe map and the log-forward buffer are bounded; the log buffer no longer drains
+  quadratically.
+
+### Observability
+- `TAKARO_DEBUG=true` logs every frame with its `requestId` at INFO, through a logger that is excluded
+  from log forwarding - which is what makes it safe (raising the old FINE logging would have created a
+  log -> gameEvent -> log amplification loop).
+- `LOG_FORWARD_LEVEL` and `LOG_FORWARD_MAX_PER_MIN` bound log forwarding.
+
+### Content
+- `entity-killed` is emitted when a player kills a mob, with the killer attributed; player deaths caused
+  by another player now carry an `attacker`. Hytale 0.6.8 records no weapon, so `weapon` is empty.
+- `listEntities` returns spawnable NPC role templates with display names.
+- `listLocations` returns the server's named warps.
+- `listItems` filters `Debug_*`/`Test_*`/`Dev_*` (`CATALOG_INCLUDE_DEBUG=true` keeps them) and includes
+  descriptions where a translation exists.
+
+### Privacy
+- HytaleCharts is strictly opt-in: no secret placeholder, promo-on-login off, no boot-time nag, and one
+  explicit line stating what is sent when it IS enabled.
+
+### Docs
+- README rewritten as a what-works / what-does-not table plus exact install steps and every config key.
+- The config path documented here now matches the code.
+
+---
+
 ## Configuration file location
 
 The config file is created and read at:

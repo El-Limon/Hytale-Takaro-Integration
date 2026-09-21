@@ -1,78 +1,135 @@
 # Hytale-Takaro Integration
 
-This mod connects your Hytale server to Takaro, giving you:
-- **Discord Integration** - Player join/leave notifications, chat relay
-- **Remote Management** - Execute commands, give items, teleport players
-- **Advanced Automation** - Hooks, cronjobs, and custom commands
-- **Player Tracking** - Real-time player locations and statistics
-- **Item Management** - Complete item database integration
+A Hytale server plugin that connects a dedicated server to [Takaro](https://takaro.io/pricing/?via=zach550).
 
-## Features
+Built and tested against **Hytale dedicated server 0.6.8**. Java 21+.
 
-### Events
-- ✅ Player join/leave notifications
-- ✅ Chat message relay
-- ✅ Real-time player tracking
+---
 
-### Commands
-- ✅ Execute console commands remotely
-- ✅ Send messages to players
-- ✅ Give items to players
-- ✅ Teleport players
-- ✅ Kick/ban/unban players
-- ✅ Execute ANY console command
+## Status
 
-### Information
-- ✅ Player list with locations
-- ✅ Server info and status
-- ✅ Complete items database
-- ✅ Player inventory viewing
+This fork (`1.14.6-elimon.1`) is the result of a hard test of upstream `mad-001/Hytale-Takaro-Integration`
+against a real 0.6.8 server, followed by a fix pass. Upstream at `ba872f1` **does not compile** against
+0.6.8 at all, so there is no stock build to compare against.
 
-## Installation
+**Nothing in the table below has been re-proven live since the fixes were written.** The code compiles,
+the unit tests pass, and each fix is written against the API signatures verified with `javap` on the
+0.6.8 server jar — but every row is marked ⚠️ until it has been exercised against a running server with
+a real client. Treat the table as "implemented, not yet proven".
 
-### Prerequisites
-- Hytale dedicated server
-- [Takaro account](https://takaro.io/pricing/?via=zach550) (free)
+| Capability | Status | Notes |
+|---|---|---|
+| Connect / identify with Takaro | ⚠️ needs live test | WebSocket to `wss://connect.takaro.io/` |
+| Reconnect + re-identify after an outage | ⚠️ needs live test | Exponential backoff; config re-read before each attempt |
+| `testReachability` | ⚠️ needs live test | Proven honest in the stock hard test (a stopped server reports unreachable) |
+| `getPlayers` | ⚠️ needs live test | Name, gameId, platformId, IP |
+| `getPlayer` — online | ⚠️ needs live test | |
+| `getPlayer` — offline | ⚠️ needs live test | Served from the known-players ledger; a never-seen player returns an error |
+| `getServerInfo` | ⚠️ needs live test | Real MOTD, real Hytale version, player counts |
+| `getPlayerLocation` | ⚠️ needs live test | Failures return an error, not `0,0,0` |
+| `getPlayerInventory` | ⚠️ needs live test | All six inventory sections; failures return an error, not `[]` |
+| `getPlayerBedLocation` | ⚠️ needs live test | Respawn points, read reflectively |
+| `giveItem` | ⚠️ needs live test | Honours `amount`; `quality` is echoed back as `qualityIgnored` (see limits) |
+| `teleportPlayer` / `teleportPlayerToPlayer` | ⚠️ needs live test | Rejects missing/non-numeric coordinates |
+| `sendMessage` — global and DM | ⚠️ needs live test | Colour codes and links supported |
+| `kickPlayer` | ⚠️ needs live test | Reason defaults when null or empty |
+| `banPlayer` / `unbanPlayer` | ⚠️ needs live test | Real Hytale `AccessControlModule`; works offline by UUID; honours `expiresAt`; state is read back before success is reported |
+| `listBans` | ⚠️ needs live test | Takaro `IBan` shape; names come from the known-players ledger |
+| `listItems` | ⚠️ needs live test | Human-readable names; `Debug_*`/`Test_*`/`Dev_*` filtered |
+| `listEntities` | ⚠️ needs live test | Spawnable NPC role templates with display names |
+| `listLocations` | ⚠️ needs live test | Named warps; empty list on a server with no warps |
+| `executeConsoleCommand` | ⚠️ needs live test | Per-command output capture; unknown command ⇒ `success:false` |
+| `shutdown` | ⚠️ needs live test | Graceful stop via the server's own shutdown path |
+| Events: connected, disconnected, chat-message, player-death, log | ⚠️ needs live test | |
+| Event: `entity-killed` | ⚠️ needs live test | Mob killed by a player; killer attributed |
+| Events survive a Takaro outage | ⚠️ needs live test | Queued (default 1000) and flushed after re-identify |
 
-### Get a Takaro Account
-1. Go to [Takaro](https://takaro.io/pricing/?via=zach550) and fill out the survey
-2. Join [Discord](https://discord.gg/pwenDRrtnA) and ask for an invite
+### What this connector does **not** do
 
-### Server Setup
-1. Download the mod JAR file
-2. Copy to your Hytale server's `mods` folder
-3. Start your server to generate the config file
-4. Stop the server
+| Missing | Why |
+|---|---|
+| Weapon on a kill or a death | Hytale 0.6.8 records none. Neither `DeathComponent` nor `Damage` nor `Damage.Source` has an item field; the nearest thing is a UI icon id. The event's `weapon` is sent empty rather than guessed. |
+| Item quality on `giveItem` | 0.6.8's `ItemStack` has no quality/variant concept the plugin can set. The requested value is echoed back as `qualityIgnored` instead of being silently dropped. |
+| Hostile/friendly classification in `listEntities` | Role templates carry no such category field, so every row reports `type: "npc"`. |
+| Map tiles | Takaro has no map support for Generic game servers. |
+| Regions / points of interest in `listLocations` | 0.6.8 has no POI, region or landmark API. Warps are the only named-point store. |
+| Backpack-aware `getPlayerInventory` guarantees beyond 0.6.8 | The whole `Inventory` class is `@Deprecated(forRemoval)` in 0.6.8; expect this to need rework on the next server release. |
 
-### Configuration
-Edit `\Hytale\Server\mods\dev.takaro_HytaleTakaroIntegration\config.properties`:
+---
 
-```properties
-# Get these from your Takaro dashboard
-IDENTITY_TOKEN=NAME-YOUR-SERVER-WHATEVER-YOU-WANT
-REGISTRATION_TOKEN=GET_THIS_FROM_THE_DIRECTIONS_BELOW
+## Install
+
+1. **Get the jar.** Build it (below) or take `HytaleTakaroMod-1.14.6-elimon.1.jar` from a release.
+2. **Drop it in the server's mods folder:**
+   ```
+   <server directory>/mods/HytaleTakaroMod-1.14.6-elimon.1.jar
+   ```
+   (For a client-hosted world: `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/`.)
+3. **Start the server once.** It creates the config at:
+   ```
+   <server directory>/mods/HytaleTakaroMod/TakaroConfig.properties
+   ```
+   That is the only path the plugin reads. Nothing is read from `mods/TakaroConfig.properties`.
+4. **In Takaro:** *Settings → Game Servers → Add Server → Generic*. Copy the registration token.
+5. **Edit the config** — set `IDENTITY_TOKEN` to a name for this server and `REGISTRATION_TOKEN` to
+   the token from step 4.
+6. **Restart the server.** The log should show `Sending identify message` then
+   `[Takaro] Successfully identified`.
+
+> Takaro rotates the domain-wide registration token whenever a new gameserver is registered. If a
+> reconnect logs `Identification REJECTED by Takaro: ... Invalid registrationToken`, paste the current
+> token into the config — it is re-read before every attempt, so no server restart is needed.
+
+## Configuration keys
+
+Written to `mods/HytaleTakaroMod/TakaroConfig.properties`.
+
+| Key | Default | What it does |
+|---|---|---|
+| `IDENTITY_TOKEN` | `MyHytaleServer` | The name this server identifies as |
+| `REGISTRATION_TOKEN` | *(empty)* | From Takaro: Settings → Game Servers → Add Server → Generic |
+| `COMMAND_PREFIX` | `!` | Prefix for Takaro chat commands (do not use `/`) |
+| `COMMAND_RESPONSE` | `[cyan]Command[-] [green]{prefix}{command}[-]` | Private confirmation sent when a command is seen |
+| `TAKARO_DEBUG` | `false` | Log every WebSocket frame (direction, type, requestId, action) at INFO |
+| `LOG_FORWARD_LEVEL` | `INFO` | Minimum server log level forwarded to Takaro. `OFF` disables forwarding |
+| `LOG_FORWARD_MAX_PER_MIN` | `120` | Cap on forwarded log records per minute (`0` = unlimited) |
+| `EVENT_QUEUE_SIZE` | `1000` | Game events held while Takaro is unreachable; oldest dropped when full |
+| `CATALOG_INCLUDE_DEBUG` | `false` | Include `Debug_*`/`Test_*`/`Dev_*` entries in `listItems` and `listEntities` |
+| `HYTALECHARTS_SECRET` | *(empty)* | **Opt-in.** Setting it sends this server's player list (usernames + UUIDs) to hytalecharts.com every 5 minutes |
+| `HYTALECHARTS_PROMO_ON_LOGIN` | `false` | Send a hytalecharts.com promo link to players when they join |
+| `HYTALECHARTS_PROMO_ENABLED` | `false` | Broadcast that promo link periodically |
+| `HYTALECHARTS_DEBUG` | `false` | Verbose HytaleCharts logging |
+
+Everything under `HYTALECHARTS_*` is off by default and sends nothing anywhere unless a secret is set.
+
+`DEV_ENABLED` / `DEV_IDENTITY_TOKEN` / `DEV_REGISTRATION_TOKEN` / `DEV_WS_URL` point the plugin at a
+development Takaro instance. **Do not enable these on a production server.**
+
+## Takaro console
+
+Type `takaro help` in the Takaro console. Every Takaro helper lives under the `takaro` namespace so it
+cannot shadow a real Hytale command; anything not starting with `takaro ` is passed straight to the
+Hytale console.
+
+## Build
+
+Needs the Hytale server jar, which is not redistributable and is never committed:
+
+```bash
+mkdir -p libs
+cp /path/to/HytaleServer.jar libs/HytaleServer.jar
+cd HytaleTakaroMod && mvn clean package
+# -> HytaleTakaroMod/target/HytaleTakaroMod-1.14.6-elimon.1.jar
 ```
 
-**Where to get tokens:**
-1. Go to your [Takaro dashboard](https://takaro.io/pricing/?via=zach550)
-2. Navigate to Settings → Game Servers
-3. Click "Add Game Server"
-4. Select "Generic" as the game type
-5. Copy the Registration Token
-6. Paste into `dev.takaro_HytaleTakaroIntegration` and replace `GET_THIS_FROM_THE_DIRECTIONS_BELOW`
+`mvn test` runs the unit tests (argument handling, event queue, ban mapping, response shaping,
+log-forward filter); none of them need the server jar at runtime.
 
-### Start Server
-Start your Hytale server and the mod will automatically connect to Takaro!
+## Note on the repository layout
 
-## Support
-- **Issues/Bugs**: [GitHub Issues](https://github.com/gettakaro/Hytale-Takaro-Integration/issues)
-- **Discord**: [Takaro Discord](https://discord.gg/pwenDRrtnA)
-- **Documentation**: [Takaro Docs](https://docs.takaro.io)
+Only `HytaleTakaroMod/` is built. The `src/` directory at the repository root is a stale duplicate of
+an older copy of the same sources and is not part of the build.
 
 ## Links
-- **Takaro Platform**: https://takaro.io/pricing/?via=zach550
-- **Source Code**: https://github.com/mad-001/Hytale-Takaro-Integration
-- **Takaro Documentation**: https://docs.takaro.io
 
-## Credits
-Developed by the Takaro team for the Hytale community.
+- [Takaro](https://takaro.io/pricing/?via=zach550) · [Discord](https://discord.gg/pwenDRrtnA)
