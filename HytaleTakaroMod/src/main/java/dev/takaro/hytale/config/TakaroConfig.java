@@ -56,6 +56,7 @@ public class TakaroConfig {
         properties.setProperty("LOG_FORWARD_MAX_PER_MIN", "120");
         properties.setProperty("EVENT_QUEUE_SIZE", "1000");
         properties.setProperty("CATALOG_INCLUDE_DEBUG", "false");
+        properties.setProperty("COMMAND_SETTLE_MS", "0");
 
         // HytaleCharts integration defaults
         properties.setProperty("HYTALECHARTS_SECRET", "");
@@ -94,6 +95,9 @@ public class TakaroConfig {
                 writer.write("EVENT_QUEUE_SIZE=1000\n");
                 writer.write("# CATALOG_INCLUDE_DEBUG: include Debug_/Test_/Dev_ entries in listItems and listEntities.\n");
                 writer.write("CATALOG_INCLUDE_DEBUG=false\n");
+                writer.write("# COMMAND_SETTLE_MS: extra time to keep collecting a console command's output\n");
+                writer.write("# after it finished (0 = none; Hytale console commands are synchronous).\n");
+                writer.write("COMMAND_SETTLE_MS=0\n");
                 writer.write("\n");
                 writer.write("# HytaleCharts Integration (third party, OPT-IN - all of it is off below):\n");
                 writer.write("# Setting HYTALECHARTS_SECRET sends this server's player list (usernames and\n");
@@ -170,6 +174,22 @@ public class TakaroConfig {
             return Math.max(1, Integer.parseInt(properties.getProperty("EVENT_QUEUE_SIZE", "1000").trim()));
         } catch (NumberFormatException e) {
             return 1000;
+        }
+    }
+
+    /**
+     * How long to keep collecting a console command's output after its future completed, in
+     * milliseconds (F15). Hytale runs console commands synchronously on a ForkJoinPool thread,
+     * so everything is already captured when the future resolves and the default is 0. Raise it
+     * only for a command known to answer asynchronously; it is capped at 2000 ms so it can never
+     * push a response past Takaro's 10 s request timeout.
+     */
+    public int getCommandSettleMs() {
+        try {
+            int value = Integer.parseInt(properties.getProperty("COMMAND_SETTLE_MS", "0").trim());
+            return Math.min(2000, Math.max(0, value));
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 

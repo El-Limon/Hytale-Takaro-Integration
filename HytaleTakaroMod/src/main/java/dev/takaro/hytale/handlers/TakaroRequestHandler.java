@@ -23,6 +23,7 @@ import dev.takaro.hytale.TakaroPlugin;
 import dev.takaro.hytale.api.HytaleApiClient;
 import static dev.takaro.hytale.util.Responses.commandResult;
 import static dev.takaro.hytale.util.Responses.commandName;
+import dev.takaro.hytale.util.CommandOutput;
 import dev.takaro.hytale.util.TakaroArgs;
 import static dev.takaro.hytale.util.Catalog.isDeveloperAsset;
 import dev.takaro.hytale.state.Bans;
@@ -594,15 +595,44 @@ public class TakaroRequestHandler {
      * <p>An unrecognised command is reported as {@code success:false} carrying the game's own
      * message, instead of the former unconditional {@code success:true} (F8).
      */
+    /**
+     * Run a real Hytale console command and return exactly its own output (F7, F15).
+     *
+     * <p>Hybrid capture:
+     * <ul>
+     *   <li>everything the command writes back to its {@link OutputCapturingCommandSender},
+     *       rendered the way the server console renders it (children included - that is what
+     *       used to swallow {@code /help}'s body), plus</li>
+     *   <li>log records emitted <em>during</em> this command's execution window <em>by the
+     *       thread(s) running it</em> ({@link ThreadScopedLogCapture}). Never the global log
+     *       stream: taking that is what made other console users' output leak into Takaro
+     *       responses (F7).</li>
+     * </ul>
+     * The two halves are merged, de-duplicated and capped by {@link CommandOutput}, which also
+     * drops {@code CommandManager}'s own {@code "... executed command: ..."} echo and anything
+     * the connector logged itself.
+     */
     private Map<String, Object> runHytaleCommand(String command) throws Exception {
         boolean known = HytaleServer.get().getCommandManager().resolveCommand(commandName(command)) != null;
 
-        OutputCapturingCommandSender sender = new OutputCapturingCommandSender();
-        HytaleServer.get().getCommandManager()
-            .handleCommand(sender, command)
-            .get(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        ThreadScopedLogCapture logCapture = new ThreadScopedLogCapture();
+        OutputCapturingCommandSender sender = new OutputCapturingCommandSender(logCapture);
+        String output;
+        try {
+            logCapture.subscribe();
+            HytaleServer.get().getCommandManager()
+                .handleCommand(sender, command)
+                .get(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-        String output = sender.getCapturedOutput().trim();
+            int settleMs = plugin.getConfig().getCommandSettleMs();
+            if (settleMs > 0) {
+                Thread.sleep(settleMs);
+            }
+        } finally {
+            logCapture.close();
+        }
+
+        output = CommandOutput.merge(sender.getCapturedMessages(), logCapture.getLines()).trim();
         if (output.isEmpty()) {
             output = known ? "Command executed (no output)" : "Command not found: " + commandName(command);
         }
