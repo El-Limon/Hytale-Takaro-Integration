@@ -5,8 +5,8 @@ import com.google.gson.JsonObject;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.logger.backend.HytaleLoggerBackend;
-import com.hypixel.hytale.math.vector.Vector3d;
-import com.hypixel.hytale.math.vector.Vector3f;
+import org.joml.Vector3d;
+import org.joml.Vector3f;
 import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
@@ -150,7 +150,7 @@ public class TakaroRequestHandler {
                 return new Object[0];
             }
 
-            List<PlayerRef> players = universe.getPlayers();
+            java.util.Collection<PlayerRef> players = universe.getPlayers();
 
             List<Map<String, Object>> playerList = players.stream().map(player -> {
                 Map<String, Object> playerData = new HashMap<>();
@@ -162,8 +162,7 @@ public class TakaroRequestHandler {
                 // Extract real IP from player connection
                 String ipAddress = "127.0.0.1";
                 try {
-                    io.netty.channel.Channel channel = player.getPacketHandler().getChannel();
-                    java.net.SocketAddress remoteAddress = com.hypixel.hytale.server.core.io.netty.NettyUtil.getRemoteSocketAddress(channel);
+                    java.net.SocketAddress remoteAddress = player.getPacketHandler().getChannel().remoteAddress();
                     if (remoteAddress instanceof java.net.InetSocketAddress) {
                         ipAddress = ((java.net.InetSocketAddress) remoteAddress).getAddress().getHostAddress();
                     }
@@ -253,8 +252,7 @@ public class TakaroRequestHandler {
             // Extract real IP from player connection
             String ipAddress = "127.0.0.1";
             try {
-                io.netty.channel.Channel channel = playerRef.getPacketHandler().getChannel();
-                java.net.SocketAddress remoteAddress = com.hypixel.hytale.server.core.io.netty.NettyUtil.getRemoteSocketAddress(channel);
+                java.net.SocketAddress remoteAddress = playerRef.getPacketHandler().getChannel().remoteAddress();
                 if (remoteAddress instanceof java.net.InetSocketAddress) {
                     ipAddress = ((java.net.InetSocketAddress) remoteAddress).getAddress().getHostAddress();
                 }
@@ -348,7 +346,7 @@ public class TakaroRequestHandler {
             } else {
                 // Send to all players (broadcast)
                 plugin.getLogger().at(java.util.logging.Level.FINE).log("Sending message to all players: " + message);
-                List<PlayerRef> players = universe.getPlayers();
+                java.util.Collection<PlayerRef> players = universe.getPlayers();
 
                 for (PlayerRef player : players) {
                     player.sendMessage(msg);
@@ -753,7 +751,7 @@ public class TakaroRequestHandler {
                 return result;
             }
 
-            playerRef.getPacketHandler().disconnect(reason);
+            playerRef.getPacketHandler().disconnect(Message.raw(reason));
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -861,9 +859,9 @@ public class TakaroRequestHandler {
 
                     Vector3d position = transform.getPosition();
                     Map<String, Object> result = new HashMap<>();
-                    result.put("x", position.getX());
-                    result.put("y", position.getY());
-                    result.put("z", position.getZ());
+                    result.put("x", position.x);
+                    result.put("y", position.y);
+                    result.put("z", position.z);
                     future.complete(result);
                 } catch (Exception e) {
                     plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error getting position: " + e.getMessage());
@@ -1020,7 +1018,7 @@ public class TakaroRequestHandler {
 
             sourceWorld.execute(() -> {
                 try {
-                    Vector3f rotation = new Vector3f(0, 0, 0);
+                    com.hypixel.hytale.math.vector.Rotation3f rotation = new com.hypixel.hytale.math.vector.Rotation3f(0, 0, 0);
                     Teleport teleport = new Teleport(targetWorld, targetPosition, rotation);
                     sourceStore.addComponent(sourceRef, Teleport.getComponentType(), teleport);
                     teleportFuture.complete(true);
@@ -1114,7 +1112,7 @@ public class TakaroRequestHandler {
             world.execute(() -> {
                 try {
                     Vector3d position = new Vector3d(x, y, z);
-                    Vector3f rotation = new Vector3f(0, 0, 0);
+                    com.hypixel.hytale.math.vector.Rotation3f rotation = new com.hypixel.hytale.math.vector.Rotation3f(0, 0, 0);
                     Teleport teleport = new Teleport(world, position, rotation);
                     store.addComponent(ref, Teleport.getComponentType(), teleport);
                     future.complete(true);
@@ -1277,7 +1275,17 @@ public class TakaroRequestHandler {
 
                 // Get combined inventory (hotbar, storage, armor, utility, backpack)
                 com.hypixel.hytale.server.core.inventory.Inventory inventory = player.getInventory();
-                com.hypixel.hytale.server.core.inventory.container.CombinedItemContainer combined = inventory.getCombinedEverything();
+                // 0.6.x removed Inventory.getCombinedEverything(); no single accessor covers every section,
+                // so combine them explicitly via the public CombinedItemContainer(ItemContainer...) constructor.
+                // Read-only use (getCapacity/getItemStack) below, so this is safe off the container's own API.
+                com.hypixel.hytale.server.core.inventory.container.CombinedItemContainer combined =
+                    new com.hypixel.hytale.server.core.inventory.container.CombinedItemContainer(
+                        inventory.getArmor(),
+                        inventory.getHotbar(),
+                        inventory.getUtility(),
+                        inventory.getStorage(),
+                        inventory.getBackpack(),
+                        inventory.getTools());
 
                 // Iterate through all inventory slots
                 for (short i = 0; i < combined.getCapacity(); i++) {
@@ -1782,7 +1790,7 @@ public class TakaroRequestHandler {
             world.execute(() -> {
                 try {
                     Vector3d position = new Vector3d(x, y, z);
-                    Vector3f rotation = new Vector3f(0, 0, 0);
+                    com.hypixel.hytale.math.vector.Rotation3f rotation = new com.hypixel.hytale.math.vector.Rotation3f(0, 0, 0);
                     Teleport teleport = new Teleport(world, position, rotation);
                     store.addComponent(ref, Teleport.getComponentType(), teleport);
                     future.complete("Teleported " + playerName + " to " + x + ", " + y + ", " + z);
@@ -1928,7 +1936,7 @@ public class TakaroRequestHandler {
 
             sourceWorld.execute(() -> {
                 try {
-                    Vector3f rotation = new Vector3f(0, 0, 0);
+                    com.hypixel.hytale.math.vector.Rotation3f rotation = new com.hypixel.hytale.math.vector.Rotation3f(0, 0, 0);
                     Teleport teleport = new Teleport(targetWorld, targetPosition, rotation);
                     sourceStore.addComponent(sourceRef, Teleport.getComponentType(), teleport);
                     teleportFuture.complete("Teleported " + sourcePlayerName + " to " + targetPlayerName);
@@ -1975,7 +1983,7 @@ public class TakaroRequestHandler {
                 return result;
             }
 
-            List<PlayerRef> players = universe.getPlayers();
+            java.util.Collection<PlayerRef> players = universe.getPlayers();
 
             if (players.isEmpty()) {
                 Map<String, Object> result = new HashMap<>();
@@ -2014,7 +2022,7 @@ public class TakaroRequestHandler {
 
                         Vector3d position = transform.getPosition();
                         String location = String.format("X: %.1f, Y: %.1f, Z: %.1f",
-                            position.getX(), position.getY(), position.getZ());
+                            position.x, position.y, position.z);
                         locationFuture.complete(location);
                     } catch (Exception e) {
                         locationFuture.complete("Error: " + e.getMessage());
@@ -2692,7 +2700,7 @@ public class TakaroRequestHandler {
                 return null;
             }
 
-            List<PlayerRef> players = universe.getPlayers();
+            java.util.Collection<PlayerRef> players = universe.getPlayers();
             for (PlayerRef player : players) {
                 if (player.getUsername().equalsIgnoreCase(playerName)) {
                     return player.getUuid().toString();

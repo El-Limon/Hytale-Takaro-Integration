@@ -36,8 +36,7 @@ public class PlayerEventListener {
             // Get player IP address
             String ipAddress = "127.0.0.1"; // Default fallback
             try {
-                Channel channel = event.getPlayerRef().getPacketHandler().getChannel();
-                SocketAddress remoteAddress = NettyUtil.getRemoteSocketAddress(channel);
+                SocketAddress remoteAddress = event.getPlayerRef().getPacketHandler().getChannel().remoteAddress();
                 if (remoteAddress instanceof InetSocketAddress) {
                     ipAddress = ((InetSocketAddress) remoteAddress).getAddress().getHostAddress();
                 }

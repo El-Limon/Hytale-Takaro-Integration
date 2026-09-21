@@ -83,9 +83,9 @@ public class PlayerDeathSystem extends RefChangeSystem<EntityStore, DeathCompone
             // Add position if available
             if (transform != null) {
                 Map<String, Object> position = new HashMap<>();
-                position.put("x", transform.getPosition().getX());
-                position.put("y", transform.getPosition().getY());
-                position.put("z", transform.getPosition().getZ());
+                position.put("x", transform.getPosition().x);
+                position.put("y", transform.getPosition().y);
+                position.put("z", transform.getPosition().z);
                 eventData.put("position", position);
             }
 

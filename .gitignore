@@ -55,7 +55,10 @@ _Reference_Materials/
 
 # Build artifacts
 *.jar
-!HytaleTakaroMod/libs/*.jar
+
+# Hytale server jar supplied locally for compilation - never commit
+libs/
+HytaleTakaroMod/libs/
 
 # Claude Code
 .claude/
