@@ -81,4 +81,22 @@ class KnownPlayersTest {
         assertNull(ledger.record("", "x", null, null));
         assertEquals(0, ledger.size());
     }
+
+    @Test
+    void synthesizesAMinimalPlayerForANeverSeenId() {
+        java.util.Map<String, Object> p = KnownPlayers.synthesize("00000000-0000-0000-0000-000000000000");
+        assertNotNull(p);
+        assertEquals("00000000-0000-0000-0000-000000000000", p.get("gameId"));
+        // name must be a non-empty String or Takaro 400s the whole IGamePlayer
+        assertTrue(p.get("name") instanceof String);
+        assertFalse(((String) p.get("name")).isEmpty());
+        assertEquals("hytale:00000000-0000-0000-0000-000000000000", p.get("platformId"));
+        assertEquals(Boolean.FALSE, p.get("online"));
+    }
+
+    @Test
+    void synthesizeNeedsAnId() {
+        assertNull(KnownPlayers.synthesize(null));
+        assertNull(KnownPlayers.synthesize(""));
+    }
 }

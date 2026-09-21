@@ -251,9 +251,24 @@ public class TakaroRequestHandler {
                     return offline;
                 }
 
+                // F19: never answer getPlayer with an error or an empty object. Takaro rejects
+                // every "no player" answer to this action - {} fails `gameId isString`, null and
+                // an error frame both give "No payload provided but expected DTO: IGamePlayer" -
+                // and the operator sees an HTTP 400 blaming their mod version. A never-seen id is
+                // answered with a minimal, honest IGamePlayer built from the id itself.
+                Map<String, Object> synthesized = KnownPlayers.synthesize(gameId);
+                if (synthesized != null) {
+                    plugin.getLogger().at(java.util.logging.Level.FINE)
+                        .log("getPlayer: " + gameId + " has never been seen by this server; "
+                            + "answering with a minimal IGamePlayer so Takaro does not 400");
+                    return synthesized;
+                }
+
+                // Name-only lookup for a name nobody has ever used: there is no id to build a
+                // player from, so this stays an error. Takaro always sends a gameId.
                 Map<String, Object> error = new HashMap<>();
                 error.put("success", false);
-                error.put("error", "Player not found (never seen by this server)");
+                error.put("error", "Player not found (no gameId, and the name has never been seen)");
                 return error;
             }
 

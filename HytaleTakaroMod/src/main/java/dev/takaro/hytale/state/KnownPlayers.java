@@ -170,6 +170,30 @@ public class KnownPlayers {
         return player;
     }
 
+    /**
+     * The minimal {@code IGamePlayer} for a game id this server has never seen (F19).
+     *
+     * <p>Takaro rejects every "no player" answer to {@code getPlayer}: {@code {}} fails
+     * {@code gameId isString}, and both {@code null} and an error frame produce
+     * "No payload provided but expected DTO: IGamePlayer" - each one a user-visible HTTP 400
+     * telling the operator their mod is out of date. A connector must therefore always answer
+     * with a real player shape, so an unknown id is echoed back as its own name rather than
+     * invented: the same convention {@code Bans.toIBan} already uses for a nameless ban (F16).
+     *
+     * @return the synthesised record, or {@code null} if there is no id to build it from
+     */
+    public static Map<String, Object> synthesize(String gameId) {
+        if (gameId == null || gameId.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> player = new java.util.HashMap<>();
+        player.put("gameId", gameId);
+        player.put("name", gameId);
+        player.put("platformId", "hytale:" + gameId);
+        player.put("online", false);
+        return player;
+    }
+
     /** All remembered game ids, for diagnostics. */
     public List<String> ids() {
         return new ArrayList<>(byId.keySet());
