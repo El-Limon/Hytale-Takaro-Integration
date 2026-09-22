@@ -1,7 +1,9 @@
 package dev.takaro.hytale.events;
 
-import com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
+import com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.Universe;
 import dev.takaro.hytale.TakaroPlugin;
 
 import java.net.InetSocketAddress;
@@ -10,6 +12,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Listens for player events from Hytale and forwards them to Takaro
@@ -19,6 +23,7 @@ public class PlayerEventListener {
     private final TakaroPlugin plugin;
     private static final long DISCONNECT_COOLDOWN_MS = 5000; // 5 seconds
     private static final int MAX_TRACKED_DISCONNECTS = 512;
+    private final Set<String> reportedReadyPlayers = ConcurrentHashMap.newKeySet();
 
     /**
      * Last disconnect time per player, used to swallow the duplicate PlayerDisconnectEvents
@@ -38,19 +43,25 @@ public class PlayerEventListener {
         this.plugin = plugin;
     }
 
-    /**
-     * Handle player connect events
-     */
-    public void onPlayerConnect(PlayerConnectEvent event) {
+    /** Hytale fires this once the client is ready in a world and its entity reference exists. */
+    public void onPlayerReady(PlayerReadyEvent event) {
         try {
-            // Extract player data
-            String playerName = event.getPlayerRef().getUsername();
-            String uuid = event.getPlayerRef().getUuid().toString();
+            PlayerRef playerRef = Universe.get().getPlayer(event.getPlayer().getUuid());
+            if (playerRef == null || playerRef.getReference() == null || !playerRef.getReference().isValid()) {
+                plugin.getLogger().at(java.util.logging.Level.WARNING).log(
+                    "PlayerReadyEvent had no world reference; connect event not forwarded");
+                return;
+            }
+            String playerName = playerRef.getUsername();
+            String uuid = playerRef.getUuid().toString();
+            if (!reportedReadyPlayers.add(uuid)) {
+                return;
+            }
 
             // Get player IP address
             String ipAddress = "127.0.0.1"; // Default fallback
             try {
-                SocketAddress remoteAddress = event.getPlayerRef().getPacketHandler().getChannel().remoteAddress();
+                SocketAddress remoteAddress = playerRef.getPacketHandler().getChannel().remoteAddress();
                 if (remoteAddress instanceof InetSocketAddress) {
                     ipAddress = ((InetSocketAddress) remoteAddress).getAddress().getHostAddress();
                 }
@@ -58,7 +69,7 @@ public class PlayerEventListener {
                 plugin.getLogger().at(java.util.logging.Level.WARNING).log("Could not get IP for player " + playerName + ": " + e.getMessage());
             }
 
-            plugin.getLogger().at(java.util.logging.Level.INFO).log("[EVENT] Player connected: " + playerName + " from " + ipAddress);
+            plugin.getLogger().at(java.util.logging.Level.INFO).log("[EVENT] Player ready: " + playerName + " from " + ipAddress);
 
             // Remember the player so offline getPlayer / listBans can name them later.
             plugin.getKnownPlayers().record(uuid, playerName, "hytale:" + uuid, ipAddress);
@@ -79,7 +90,7 @@ public class PlayerEventListener {
             plugin.getLogger().at(java.util.logging.Level.FINE).log("Forwarded player connect to Takaro");
 
         } catch (Exception e) {
-            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error handling player connect: " + e.getMessage());
+            plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error handling player ready: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -92,6 +103,7 @@ public class PlayerEventListener {
             // Extract player data
             String playerName = event.getPlayerRef().getUsername();
             String uuid = event.getPlayerRef().getUuid().toString();
+            reportedReadyPlayers.remove(uuid);
 
             plugin.getLogger().at(java.util.logging.Level.FINE).log("[EVENT] Player disconnected: " + playerName);
 

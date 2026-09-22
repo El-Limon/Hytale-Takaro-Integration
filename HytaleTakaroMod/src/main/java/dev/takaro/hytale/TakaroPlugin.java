@@ -36,7 +36,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class TakaroPlugin extends JavaPlugin {
-    private static final String VERSION = "1.14.6-elimon.5";
+    private static final String VERSION = "1.14.6-elimon.6";
     private static final String HYTALECHARTS_API_URL = "https://hytalecharts.com/api/heartbeat";
     private static final int HEARTBEAT_INTERVAL_SECONDS = 300; // 5 minutes
 
@@ -139,12 +139,12 @@ public class TakaroPlugin extends JavaPlugin {
             );
             getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerChatEvent handler");
 
-            // Register player connect event
+            // Notify Takaro only once the player has a world entity and a readable position.
             this.getEventRegistry().registerGlobal(
-                com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent.class,
-                playerListener::onPlayerConnect
+                com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent.class,
+                playerListener::onPlayerReady
             );
-            getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerConnectEvent handler");
+            getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerReadyEvent handler");
 
             // Register player disconnect event
             this.getEventRegistry().registerGlobal(
