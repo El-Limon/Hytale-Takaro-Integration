@@ -8,8 +8,11 @@ import com.hypixel.hytale.component.query.Query;
 import com.hypixel.hytale.component.system.RefChangeSystem;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.entity.nameplate.Nameplate;
+import com.hypixel.hytale.server.core.inventory.InventoryComponent;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.AllLegacyLivingEntityTypesQuery;
 import com.hypixel.hytale.server.core.modules.entity.damage.Damage;
+import com.hypixel.hytale.server.core.modules.entity.damage.DamageCause;
 import com.hypixel.hytale.server.core.modules.entity.damage.DeathComponent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -33,10 +36,10 @@ import java.util.Map;
  * a {@code Damage.EntitySource} carries the attacker's {@code Ref}, from which the killer's
  * {@code PlayerRef} is read. This is the same path Hytale's own PlayerKilledPlayer system uses.
  *
- * <p><b>Honest limitation:</b> Hytale 0.6.8 records no weapon on a death. Neither
- * {@code DeathComponent} nor {@code Damage} nor {@code Damage.Source} has an item field - the
- * closest thing is a {@code MetaKey<String> DEATH_ICON} (a UI icon id). The {@code weapon} field
- * of the event is therefore sent empty rather than guessed at.
+ * <p>Hytale 0.6.8 does not store a weapon on the death damage. For a direct physical
+ * player hit, the attacker's held item at the death callback is the best available
+ * item identifier. Projectile and other delayed damage are left empty rather than
+ * reporting an unrelated item the player may now hold.
  *
  * <p>Everything here runs on the world thread that owns the dying entity, inside the ECS
  * callback. It does only component reads and hands the event to the WebSocket layer, which
@@ -88,8 +91,7 @@ public class EntityDeathSystem extends RefChangeSystem<EntityStore, DeathCompone
             Map<String, Object> eventData = new HashMap<>();
             eventData.put("player", player);
             eventData.put("entity", entityName(ref, commandBuffer));
-            // 0.6.8 records no weapon on a death - see the class comment.
-            eventData.put("weapon", "");
+            eventData.put("weapon", weaponForDirectHit(deathComponent, commandBuffer));
 
             plugin.sendGameEventToAll("entity-killed", eventData);
         } catch (Exception e) {
@@ -113,6 +115,28 @@ public class EntityDeathSystem extends RefChangeSystem<EntityStore, DeathCompone
             return null;
         }
         return commandBuffer.getComponent(attacker, PlayerRef.getComponentType());
+    }
+
+    /** Item id held by the player for a direct physical killing blow, when available. */
+    static String weaponForDirectHit(DeathComponent deathComponent, CommandBuffer<EntityStore> commandBuffer) {
+        Damage damage = deathComponent.getDeathInfo();
+        if (damage == null || !(damage.getSource() instanceof Damage.EntitySource)
+                || damage.getSource() instanceof Damage.ProjectileSource) {
+            return "";
+        }
+        DamageCause cause = damage.getCause();
+        if (cause == null || !"Physical".equalsIgnoreCase(cause.getId())) {
+            return "";
+        }
+        Ref<EntityStore> attacker = ((Damage.EntitySource) damage.getSource()).getRef();
+        if (attacker == null || !attacker.isValid()) {
+            return "";
+        }
+        if (commandBuffer.getComponent(attacker, Player.getComponentType()) == null) {
+            return "";
+        }
+        ItemStack held = InventoryComponent.getItemInHand(commandBuffer, attacker);
+        return ItemStack.isEmpty(held) ? "" : held.getItemId();
     }
 
     /** Best human-readable name for a dead entity. */
