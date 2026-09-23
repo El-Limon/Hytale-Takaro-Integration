@@ -23,7 +23,10 @@ public class PlayerEventListener {
     private final TakaroPlugin plugin;
     private static final long DISCONNECT_COOLDOWN_MS = 5000; // 5 seconds
     private static final int MAX_TRACKED_DISCONNECTS = 512;
+    private static final long DISCONNECT_LOCATION_WINDOW_MS = 60_000;
     private final Set<String> reportedReadyPlayers = ConcurrentHashMap.newKeySet();
+    private final Map<String, Map<String, Object>> lastPositions = new ConcurrentHashMap<>();
+    private final Map<String, Long> disconnectLocationUntil = new ConcurrentHashMap<>();
 
     /**
      * Last disconnect time per player, used to swallow the duplicate PlayerDisconnectEvents
@@ -43,6 +46,34 @@ public class PlayerEventListener {
         this.plugin = plugin;
     }
 
+    public boolean isPlayerReady(String gameId) {
+        return reportedReadyPlayers.contains(gameId);
+    }
+
+    public void rememberPosition(String gameId, double x, double y, double z) {
+        lastPositions.put(gameId, Map.of("x", x, "y", y, "z", z));
+    }
+
+    /** Takaro asks for the departed player's location while storing the disconnect event. */
+    public Map<String, Object> disconnectPosition(String gameId) {
+        Long until = disconnectLocationUntil.get(gameId);
+        if (until == null) return null;
+        if (System.currentTimeMillis() > until) {
+            disconnectLocationUntil.remove(gameId, until);
+            lastPositions.remove(gameId);
+            return null;
+        }
+        return lastPositions.get(gameId);
+    }
+
+    private void pruneExpiredPositions(long now) {
+        disconnectLocationUntil.forEach((gameId, until) -> {
+            if (now > until && disconnectLocationUntil.remove(gameId, until)) {
+                lastPositions.remove(gameId);
+            }
+        });
+    }
+
     /** Hytale fires this once the client is ready in a world and its entity reference exists. */
     public void onPlayerReady(PlayerReadyEvent event) {
         try {
@@ -57,6 +88,9 @@ public class PlayerEventListener {
             if (!reportedReadyPlayers.add(uuid)) {
                 return;
             }
+            pruneExpiredPositions(System.currentTimeMillis());
+            disconnectLocationUntil.remove(uuid);
+            lastPositions.remove(uuid);
 
             // Get player IP address
             String ipAddress = "127.0.0.1"; // Default fallback
@@ -109,12 +143,16 @@ public class PlayerEventListener {
 
             // Deduplicate - Hytale fires PlayerDisconnectEvent multiple times
             long currentTime = System.currentTimeMillis();
+            pruneExpiredPositions(currentTime);
             Long lastTime = lastDisconnectTime.get(uuid);
             if (lastTime != null && (currentTime - lastTime) < DISCONNECT_COOLDOWN_MS) {
                 plugin.getLogger().at(java.util.logging.Level.INFO).log("Ignoring duplicate disconnect event for: " + playerName);
                 return;
             }
             lastDisconnectTime.put(uuid, currentTime);
+            if (lastPositions.containsKey(uuid)) {
+                disconnectLocationUntil.put(uuid, currentTime + DISCONNECT_LOCATION_WINDOW_MS);
+            }
 
             // Build disconnect event for Takaro
             Map<String, Object> eventData = new HashMap<>();

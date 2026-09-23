@@ -36,7 +36,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class TakaroPlugin extends JavaPlugin {
-    private static final String VERSION = "1.14.6-elimon.6";
+    private static final String VERSION = "1.14.6-elimon.7";
     private static final String HYTALECHARTS_API_URL = "https://hytalecharts.com/api/heartbeat";
     private static final int HEARTBEAT_INTERVAL_SECONDS = 300; // 5 minutes
 
@@ -516,6 +516,10 @@ public class TakaroPlugin extends JavaPlugin {
 
     public KnownPlayers getKnownPlayers() {
         return knownPlayers;
+    }
+
+    public PlayerEventListener getPlayerListener() {
+        return playerListener;
     }
 
     public TakaroConfig getConfig() {

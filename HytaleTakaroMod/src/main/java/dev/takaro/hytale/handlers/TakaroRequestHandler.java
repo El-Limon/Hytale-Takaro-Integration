@@ -172,7 +172,11 @@ public class TakaroRequestHandler {
 
             java.util.Collection<PlayerRef> players = universe.getPlayers();
 
-            List<Map<String, Object>> playerList = players.stream().map(player -> {
+            // Universe exposes the PlayerRef before PlayerReadyEvent. Reporting it here makes
+            // Takaro request inventory while Hytale is still attaching the world entity.
+            List<Map<String, Object>> playerList = players.stream()
+                .filter(player -> plugin.getPlayerListener().isPlayerReady(player.getUuid().toString()))
+                .map(player -> {
                 Map<String, Object> playerData = new HashMap<>();
                 String uuid = player.getUuid().toString();
                 playerData.put("name", player.getUsername());
@@ -1082,12 +1086,12 @@ public class TakaroRequestHandler {
                 .orElse(null);
 
             if (playerRef == null) {
-                return errorResult("Player is not online: " + gameId);
+                return disconnectedLocationOrError(gameId, "Player is not online: " + gameId);
             }
 
             Ref<EntityStore> ref = playerRef.getReference();
             if (ref == null || !ref.isValid()) {
-                return errorResult("Player is not in a world: " + gameId);
+                return disconnectedLocationOrError(gameId, "Player is not in a world: " + gameId);
             }
 
             Store<EntityStore> store = ref.getStore();
@@ -1109,6 +1113,7 @@ public class TakaroRequestHandler {
                     result.put("x", position.x);
                     result.put("y", position.y);
                     result.put("z", position.z);
+                    plugin.getPlayerListener().rememberPosition(gameId, position.x, position.y, position.z);
                     future.complete(result);
                 } catch (Exception e) {
                     plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error getting position: " + e.getMessage());
@@ -1126,6 +1131,16 @@ public class TakaroRequestHandler {
             e.printStackTrace();
             return errorResult(String.valueOf(e.getMessage()));
         }
+    }
+
+    private Object disconnectedLocationOrError(String gameId, String message) {
+        Map<String, Object> position = plugin.getPlayerListener().disconnectPosition(gameId);
+        if (position != null) {
+            plugin.getLogger().at(java.util.logging.Level.INFO).log(
+                "Returning last known position for recent disconnect: " + gameId);
+            return position;
+        }
+        return errorResult(message);
     }
 
     /** Stop the server through its own shutdown path, after the response has been sent. */
