@@ -14,6 +14,8 @@ import dev.takaro.hytale.commands.TakaroDebugCommand;
 import dev.takaro.hytale.config.TakaroConfig;
 import dev.takaro.hytale.events.ChatEventListener;
 import dev.takaro.hytale.events.EntityDeathSystem;
+import dev.takaro.hytale.events.ProjectileWeaponSystem;
+import dev.takaro.hytale.events.ModernProjectileWeaponSystem;
 import dev.takaro.hytale.events.PlayerDeathSystem;
 import dev.takaro.hytale.events.PlayerEventListener;
 import dev.takaro.hytale.events.TakaroLogHandler;
@@ -36,7 +38,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class TakaroPlugin extends JavaPlugin {
-    private static final String VERSION = "1.14.6-elimon.9";
+    private static final String VERSION = "1.14.6-elimon.13";
     private static final String HYTALECHARTS_API_URL = "https://hytalecharts.com/api/heartbeat";
     private static final int HEARTBEAT_INTERVAL_SECONDS = 300; // 5 minutes
 
@@ -49,6 +51,7 @@ public class TakaroPlugin extends JavaPlugin {
     private PlayerEventListener playerListener;
     private PlayerDeathSystem deathSystem;
     private EntityDeathSystem entityDeathSystem;
+    private ProjectileWeaponSystem projectileWeaponSystem;
     private TakaroLogHandler logHandler;
     private KnownPlayers knownPlayers;
     private java.util.concurrent.ExecutorService requestExecutor;
@@ -108,7 +111,8 @@ public class TakaroPlugin extends JavaPlugin {
         chatListener = new ChatEventListener(this);
         playerListener = new PlayerEventListener(this);
         deathSystem = new PlayerDeathSystem(this);
-        entityDeathSystem = new EntityDeathSystem(this);
+        projectileWeaponSystem = new ProjectileWeaponSystem(this);
+        entityDeathSystem = new EntityDeathSystem(this, projectileWeaponSystem);
         logHandler = new TakaroLogHandler(this);
 
         // Register events (official pattern)
@@ -167,6 +171,12 @@ public class TakaroPlugin extends JavaPlugin {
             // Register player death system with entity store registry
             this.getEntityStoreRegistry().registerSystem(deathSystem);
             getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerDeathSystem");
+
+            this.getEntityStoreRegistry().registerSystem(projectileWeaponSystem);
+            getLogger().at(java.util.logging.Level.INFO).log("Registered ProjectileWeaponSystem");
+
+            this.getEntityStoreRegistry().registerSystem(new ModernProjectileWeaponSystem(projectileWeaponSystem));
+            getLogger().at(java.util.logging.Level.INFO).log("Registered ModernProjectileWeaponSystem");
 
             this.getEntityStoreRegistry().registerSystem(entityDeathSystem);
             getLogger().at(java.util.logging.Level.INFO).log("Registered EntityDeathSystem (entity-killed)");

@@ -36,10 +36,10 @@ import java.util.Map;
  * a {@code Damage.EntitySource} carries the attacker's {@code Ref}, from which the killer's
  * {@code PlayerRef} is read. This is the same path Hytale's own PlayerKilledPlayer system uses.
  *
- * <p>Hytale 0.6.8 does not store a weapon on the death damage. For a direct physical
- * player hit, the attacker's held item at the death callback is the best available
- * item identifier. Projectile and other delayed damage are left empty rather than
- * reporting an unrelated item the player may now hold.
+ * <p>Hytale 0.6.8 does not store a weapon on the death damage. Direct physical
+ * hits use the attacker's held item; projectile hits use the item captured when
+ * that projectile was created. Other delayed damage is left empty when the
+ * originating item cannot be determined.
  *
  * <p>Everything here runs on the world thread that owns the dying entity, inside the ECS
  * callback. It does only component reads and hands the event to the WebSocket layer, which
@@ -47,9 +47,11 @@ import java.util.Map;
  */
 public class EntityDeathSystem extends RefChangeSystem<EntityStore, DeathComponent> {
     private final TakaroPlugin plugin;
+    private final ProjectileWeaponSystem projectileWeapons;
 
-    public EntityDeathSystem(TakaroPlugin plugin) {
+    public EntityDeathSystem(TakaroPlugin plugin, ProjectileWeaponSystem projectileWeapons) {
         this.plugin = plugin;
+        this.projectileWeapons = projectileWeapons;
     }
 
     @Nonnull
@@ -91,13 +93,40 @@ public class EntityDeathSystem extends RefChangeSystem<EntityStore, DeathCompone
             Map<String, Object> eventData = new HashMap<>();
             eventData.put("player", player);
             eventData.put("entity", entityName(ref, commandBuffer));
-            eventData.put("weapon", weaponForDirectHit(deathComponent, commandBuffer));
+            eventData.put("weapon", weaponForKill(deathComponent, commandBuffer));
 
             plugin.sendGameEventToAll("entity-killed", eventData);
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log(
                 "Error handling entity death: " + e.getMessage());
         }
+    }
+
+    private String weaponForKill(DeathComponent deathComponent, CommandBuffer<EntityStore> commandBuffer) {
+        Damage damage = deathComponent.getDeathInfo();
+        if (damage != null && damage.getSource() instanceof Damage.ProjectileSource projectileSource) {
+            String firedItem = projectileWeapons.weaponFor(projectileSource, commandBuffer);
+            if (!firedItem.isEmpty()) {
+                return firedItem;
+            }
+        }
+        // Bow impacts in Hytale 0.6.8 can arrive as a plain EntitySource with cause
+        // Projectile, with no projectile reference to join to a launch snapshot.
+        // Credit the equipped bow only while it is still held at the killing blow.
+        if (damage != null && damage.getCause() != null
+                && "Projectile".equalsIgnoreCase(damage.getCause().getId())
+                && damage.getSource() instanceof Damage.EntitySource source) {
+            Ref<EntityStore> attacker = source.getRef();
+            if (attacker != null && attacker.isValid()
+                    && commandBuffer.getComponent(attacker, Player.getComponentType()) != null) {
+                ItemStack held = InventoryComponent.getItemInHand(commandBuffer, attacker);
+                if (!ItemStack.isEmpty(held) && held.getItemId() != null
+                        && held.getItemId().toLowerCase(java.util.Locale.ROOT).contains("bow")) {
+                    return held.getItemId();
+                }
+            }
+        }
+        return weaponForDirectHit(deathComponent, commandBuffer);
     }
 
     /** The player who dealt the killing blow, or null when the killer was not a player. */
