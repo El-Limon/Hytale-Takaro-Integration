@@ -212,7 +212,8 @@ public class TakaroWebSocket extends WebSocketClient {
             WireLogger.frame(config.isDebug(), getLogPrefix(), WireLogger.OUT,
                 String.valueOf(message.get("type")),
                 message.get("requestId") == null ? null : String.valueOf(message.get("requestId")),
-                eventTypeOf(message));
+                eventTypeOf(message),
+                config.isDebug() ? dev.takaro.hytale.util.IdentityTrace.of(message) : null);
             send(gson.toJson(message));
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix() + "Send failed: " + e.getMessage());

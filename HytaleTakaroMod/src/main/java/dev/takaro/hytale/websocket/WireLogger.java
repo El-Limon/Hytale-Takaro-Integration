@@ -36,6 +36,15 @@ public final class WireLogger {
      */
     public static void frame(boolean enabled, String prefix, String direction,
                              String type, String requestId, String action) {
+        frame(enabled, prefix, direction, type, requestId, action, null);
+    }
+
+    /**
+     * @param identity player identity fields carried by the frame ({@link dev.takaro.hytale.util.IdentityTrace}),
+     *                 or null
+     */
+    public static void frame(boolean enabled, String prefix, String direction,
+                             String type, String requestId, String action, String identity) {
         if (!enabled) {
             return;
         }
@@ -48,6 +57,9 @@ public final class WireLogger {
             }
             if (action != null) {
                 sb.append(" action=").append(action);
+            }
+            if (identity != null) {
+                sb.append(" ids=").append(identity);
             }
             LogRecord record = new LogRecord(Level.INFO, sb.toString());
             record.setLoggerName(LogForwardFilter.WIRE_LOGGER_NAME);

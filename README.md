@@ -90,7 +90,7 @@ Written to `mods/HytaleTakaroMod/TakaroConfig.properties`.
 | `REGISTRATION_TOKEN` | *(empty)* | From Takaro: Settings → Game Servers → Add Server → Generic |
 | `COMMAND_PREFIX` | `!` | Prefix for Takaro chat commands (do not use `/`) |
 | `COMMAND_RESPONSE` | `[cyan]Command[-] [green]{prefix}{command}[-]` | Private confirmation sent when a command is seen |
-| `TAKARO_DEBUG` | `false` | Log every WebSocket frame (direction, type, requestId, action) at INFO |
+| `TAKARO_DEBUG` | `false` | Log every WebSocket frame (direction, type, requestId, action, and the player identity fields it carries) at INFO |
 | `LOG_FORWARD_LEVEL` | `INFO` | Minimum server log level forwarded to Takaro. `OFF` disables forwarding |
 | `LOG_FORWARD_MAX_PER_MIN` | `120` | Cap on forwarded log records per minute (`0` = unlimited) |
 | `EVENT_QUEUE_SIZE` | `1000` | Game events held while Takaro is unreachable; oldest dropped when full |
