@@ -4,6 +4,19 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
+## 1.14.6-elimon.14
+
+### Diagnostics
+- `TAKARO_DEBUG=true` now also logs the player identity fields of every outgoing frame
+  (`ids=[gameId=… platformId=hytale:…]` on `player-connected`, `chat-message`, deaths, kills and the
+  `getPlayers`/`getPlayer` responses). Takaro matches players only on those explicit fields, so this
+  shows on the connector side exactly what identity was sent. Chat text and other payload content
+  are not logged.
+
+### Legacy tree
+- The unbuilt repository-root plugin (`src/`) sent the Hytale account UUID as `steamId` on connect,
+  disconnect and chat. It now sends `platformId: hytale:<uuid>` like the shipped plugin.
+
 ## 1.14.6-elimon.5
 
 ### Console

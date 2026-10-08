@@ -85,7 +85,7 @@ public class TakaroConfig {
                 writer.write("COMMAND_RESPONSE=[cyan]Command[-] [green]{prefix}{command}[-]\n");
                 writer.write("\n");
                 writer.write("# Diagnostics:\n");
-                writer.write("# TAKARO_DEBUG: log every WebSocket frame (direction, type, requestId, action) at INFO.\n");
+                writer.write("# TAKARO_DEBUG: log every WebSocket frame (direction, type, requestId, action, player identity fields) at INFO.\n");
                 writer.write("# LOG_FORWARD_LEVEL: minimum server log level forwarded to Takaro (OFF disables forwarding).\n");
                 writer.write("# LOG_FORWARD_MAX_PER_MIN: cap on forwarded log records per minute (0 = unlimited).\n");
                 writer.write("# EVENT_QUEUE_SIZE: how many game events to hold while Takaro is unreachable.\n");
