@@ -38,7 +38,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class TakaroPlugin extends JavaPlugin {
-    private static final String VERSION = "1.14.6-elimon.14";
+    private static final String VERSION = "1.14.6-elimon.15";
     private static final String HYTALECHARTS_API_URL = "https://hytalecharts.com/api/heartbeat";
     private static final int HEARTBEAT_INTERVAL_SECONDS = 300; // 5 minutes
 
@@ -55,6 +55,7 @@ public class TakaroPlugin extends JavaPlugin {
     private TakaroLogHandler logHandler;
     private KnownPlayers knownPlayers;
     private java.util.concurrent.ExecutorService requestExecutor;
+    private dev.takaro.hytale.map.WorldMapService worldMap;
     private ScheduledExecutorService telemetryScheduler;
 
     // HytaleCharts integration
@@ -235,6 +236,12 @@ public class TakaroPlugin extends JavaPlugin {
 
         // Start log forwarding to Takaro
         logHandler.start();
+
+        // Draw the world map for getMapInfo/getMapTile in the background
+        if (config.isMapEnabled()) {
+            worldMap = new dev.takaro.hytale.map.WorldMapService(this, getFile().getParent().resolve("HytaleTakaroMod"));
+            worldMap.start();
+        }
     }
 
     private void reportTelemetry() {
@@ -477,6 +484,10 @@ public class TakaroPlugin extends JavaPlugin {
             requestExecutor.shutdownNow();
         }
 
+        if (worldMap != null) {
+            worldMap.stop();
+        }
+
         if (telemetryScheduler != null) {
             telemetryScheduler.shutdownNow();
         }
@@ -522,6 +533,11 @@ public class TakaroPlugin extends JavaPlugin {
 
     public TakaroWebSocket getDevWebSocket() {
         return devWebSocket;
+    }
+
+    /** The world map service, or null when MAP_ENABLED=false. */
+    public dev.takaro.hytale.map.WorldMapService getWorldMap() {
+        return worldMap;
     }
 
     public KnownPlayers getKnownPlayers() {

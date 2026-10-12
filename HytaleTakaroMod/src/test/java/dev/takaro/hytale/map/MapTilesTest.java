@@ -1,0 +1,152 @@
+package dev.takaro.hytale.map;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class MapTilesTest {
+
+    private static final int GREEN = 0x22AA22FF;
+    private static final int MARK = 0xFF00FFFF;
+
+    private static int[] solid(int rgba) {
+        int[] px = new int[ChunkRaster.CELLS];
+        Arrays.fill(px, rgba);
+        return px;
+    }
+
+    private static BufferedImage decode(String base64) throws Exception {
+        return ImageIO.read(new ByteArrayInputStream(Base64.getDecoder().decode(base64)));
+    }
+
+    private static int argbOf(int rgba) {
+        return (rgba & 0xFF) << 24 | (rgba >>> 8);
+    }
+
+    @Test
+    void pngRoundTripsThroughImageIo() throws Exception {
+        int[] px = new int[4 * 3];
+        for (int i = 0; i < px.length; i++) {
+            px[i] = (i * 20) << 24 | (255 - i * 20) << 16 | 7 << 8 | 0xFF;
+        }
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(PngEncoder.encodeRgba(4, 3, px)));
+        assertEquals(4, img.getWidth());
+        assertEquals(3, img.getHeight());
+        assertEquals(argbOf(px[2 * 4 + 1]), img.getRGB(1, 2));
+    }
+
+    @Test
+    void aBlockLandsOnThePixelThePlayerMapExpects() throws Exception {
+        ChunkRaster raster = new ChunkRaster();
+        // Chunk (-2, 3) covers blocks x -64..-33, z 96..127; mark block (-50, 100).
+        int[] px = solid(GREEN);
+        px[(100 - 96) * 32 + (-50 + 64)] = MARK;
+        raster.put(-2, 3, px, 1);
+        MapTiles tiles = new MapTiles(raster, 16);
+
+        int[] at = MapGeometry.locate(4, -50 + 0.5, 100 + 0.5);
+        BufferedImage img = decode(tiles.tileBase64(4, at[0], at[1]));
+        assertEquals(argbOf(MARK), img.getRGB(at[2], at[3]));
+        assertEquals(argbOf(GREEN), img.getRGB(at[2] + 1, at[3]));
+        // Unexplored blocks in the same tile stay transparent.
+        int[] outside = MapGeometry.locate(4, 10.5, 100.5);
+        assertEquals(0, img.getRGB(outside[2], outside[3]) >>> 24);
+    }
+
+    @Test
+    void tilesWithoutExploredChunksAreEmpty() {
+        ChunkRaster raster = new ChunkRaster();
+        raster.put(0, 0, solid(GREEN), 1);
+        MapTiles tiles = new MapTiles(raster, 16);
+        assertNotNull(tiles.tileBase64(4, 0, 0));
+        assertNotNull(tiles.tileBase64(0, 0, 0));
+        assertNull(tiles.tileBase64(4, 5, 5));
+        assertNull(tiles.tileBase64(0, -1, -1));
+    }
+
+    @Test
+    void redrawnChunksInvalidateCachedTiles() throws Exception {
+        ChunkRaster raster = new ChunkRaster();
+        raster.put(0, 0, solid(GREEN), 1);
+        MapTiles tiles = new MapTiles(raster, 16);
+        String before = tiles.tileBase64(4, 0, 0);
+        raster.put(0, 0, solid(MARK), 2);
+        String after = tiles.tileBase64(4, 0, 0);
+        assertNotEquals(before, after);
+        int[] at = MapGeometry.locate(4, 1.5, 1.5);
+        assertEquals(argbOf(MARK), decode(after).getRGB(at[2], at[3]));
+    }
+
+    @Test
+    void rasterSurvivesSaveAndLoadForTheSameWorldOnly(@TempDir Path dir) throws Exception {
+        ChunkRaster raster = new ChunkRaster();
+        raster.put(-3, 7, solid(MARK), 42);
+        Path file = dir.resolve("worldmap-default.bin");
+        raster.save(file, 99);
+        assertFalse(raster.isDirty());
+
+        ChunkRaster copy = new ChunkRaster();
+        assertEquals(1, copy.load(file, 99));
+        assertEquals(MARK, copy.pixelAt(-3 * 32 + 4, 7 * 32 + 9));
+        assertEquals(42, copy.get(-3, 7).renderedAt());
+
+        ChunkRaster other = new ChunkRaster();
+        assertEquals(-1, other.load(file, 100));
+        assertEquals(0, other.size());
+        assertEquals(-1, other.load(dir.resolve("missing.bin"), 99));
+    }
+
+    @Test
+    void maxAbsBlockCoversNegativeChunks() {
+        ChunkRaster raster = new ChunkRaster();
+        assertEquals(0, raster.maxAbsBlock());
+        raster.put(-5, 2, solid(GREEN), 1);
+        assertEquals(160, raster.maxAbsBlock());
+    }
+
+    @Test
+    void plannerDrawsOnlyChunksWhoseNeighboursExist() {
+        Set<Long> existing = new HashSet<>();
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) {
+                existing.add(ChunkRaster.key(x, z));
+            }
+        }
+        ChunkRaster raster = new ChunkRaster();
+        List<Long> plan = RenderPlanner.plan(existing, List.of(), raster, 0, 1000, 100);
+        // Only the inner 3x3 has all eight neighbours; the border ring would make the
+        // generator create new chunks.
+        assertEquals(9, plan.size());
+        for (Long key : plan) {
+            assertTrue(Math.abs(ChunkRaster.keyX(key)) <= 1 && Math.abs(ChunkRaster.keyZ(key)) <= 1);
+        }
+        assertEquals(ChunkRaster.key(0, 0), plan.get(0), "nearest the origin first");
+    }
+
+    @Test
+    void plannerRefreshesOnlyStaleActiveChunks() {
+        Set<Long> existing = new HashSet<>();
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                existing.add(ChunkRaster.key(x, z));
+            }
+        }
+        ChunkRaster raster = new ChunkRaster();
+        raster.put(0, 0, solid(GREEN), 1_000);
+        long centre = ChunkRaster.key(0, 0);
+        assertTrue(RenderPlanner.plan(existing, List.of(centre), raster, 1_500, 1_000, 10).isEmpty());
+        assertEquals(List.of(centre), RenderPlanner.plan(existing, List.of(centre), raster, 2_000, 1_000, 10));
+        assertTrue(RenderPlanner.plan(existing, List.of(), raster, 2_000, 1_000, 10).isEmpty());
+    }
+}

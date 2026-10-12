@@ -194,6 +194,11 @@ public class TakaroConfig {
     }
 
     /** Include Debug_/Test_/Dev_ entries in listItems and listEntities (F10). */
+    /** Serve the world map to Takaro (getMapInfo/getMapTile). On unless MAP_ENABLED=false. */
+    public boolean isMapEnabled() {
+        return !"false".equalsIgnoreCase(properties.getProperty("MAP_ENABLED", "true").trim());
+    }
+
     public boolean isCatalogIncludeDebug() {
         return Boolean.parseBoolean(properties.getProperty("CATALOG_INCLUDE_DEBUG", "false").trim());
     }

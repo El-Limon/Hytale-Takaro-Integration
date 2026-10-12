@@ -133,6 +133,12 @@ public class TakaroRequestHandler {
                 case "listLocations":
                     responsePayload = handleListLocations();
                     break;
+                case "getMapInfo":
+                    responsePayload = handleGetMapInfo();
+                    break;
+                case "getMapTile":
+                    responsePayload = handleGetMapTile(payload);
+                    break;
                 default:
                     plugin.getLogger().at(java.util.logging.Level.WARNING).log("Unknown action: " + action);
                     Map<String, String> error = new HashMap<>();
@@ -149,6 +155,41 @@ public class TakaroRequestHandler {
 
         // Send response back to the WebSocket that sent the request
         sourceWebSocket.sendResponse(requestId, responsePayload);
+    }
+
+    /** Map info for the default world; {@code enabled:false} when the map is off or not ready. */
+    private Object handleGetMapInfo() {
+        dev.takaro.hytale.map.WorldMapService map = plugin.getWorldMap();
+        boolean enabled = map != null && map.isReady();
+        int extent = dev.takaro.hytale.map.MapGeometry.extentFor(enabled ? map.raster().maxAbsBlock() : 0);
+        return dev.takaro.hytale.map.MapGeometry.mapInfo(enabled, extent);
+    }
+
+    /** One 128 px tile as a base64 PNG, in the 7 Days to Die web-map layout (see MapGeometry). */
+    private Object handleGetMapTile(JsonObject payload) {
+        dev.takaro.hytale.map.WorldMapService map = plugin.getWorldMap();
+        if (map == null) {
+            return errorResult("map_disabled: MAP_ENABLED=false in TakaroConfig.properties");
+        }
+        if (!map.isReady()) {
+            return errorResult("map_not_ready: " + map.status());
+        }
+        TakaroArgs args = TakaroArgs.of(payload);
+        if (!args.hasNumber("x") || !args.hasNumber("y")) {
+            return errorResult("invalid_args: getMapTile needs x, y and z");
+        }
+        int x = args.intVal("x", 0);
+        int y = args.intVal("y", 0);
+        int zoom = args.hasNumber("z") ? args.intVal("z", -1) : args.intVal("zoom", -1);
+        if (!dev.takaro.hytale.map.MapGeometry.isValidZoom(zoom)) {
+            return errorResult("invalid_args: zoom " + zoom + " is outside 0.."
+                + dev.takaro.hytale.map.MapGeometry.MAX_ZOOM);
+        }
+        String png = map.tiles().tileBase64(zoom, x, y);
+        if (png == null) {
+            return errorResult("tile_empty: no explored terrain in tile " + zoom + "/" + x + "/" + y);
+        }
+        return png;
     }
 
     private Object handleTestReachability() {

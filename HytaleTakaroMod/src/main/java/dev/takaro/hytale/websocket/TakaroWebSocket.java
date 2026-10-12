@@ -299,9 +299,19 @@ public class TakaroWebSocket extends WebSocketClient {
         return pendingEvents.droppedCount();
     }
 
+    /**
+     * Backoff before reconnect attempt {@code attempt} (1-based): 3 s doubling up to 60 s. The
+     * exponent is capped so a long outage cannot overflow into a negative or multi-week delay.
+     */
+    static int reconnectDelayMs(int attempt) {
+        int exponent = Math.max(0, Math.min(attempt - 1, 16));
+        long delay = (long) BASE_RECONNECT_DELAY << exponent;
+        return (int) Math.min(delay, MAX_RECONNECT_DELAY);
+    }
+
     private void scheduleReconnect() {
         reconnectAttempts++;
-        int exponentialDelay = Math.min(BASE_RECONNECT_DELAY * (int)Math.pow(2, reconnectAttempts - 1), MAX_RECONNECT_DELAY);
+        int exponentialDelay = reconnectDelayMs(reconnectAttempts);
         int jitter = (int)(Math.random() * exponentialDelay * 0.25);
         int delayMs = exponentialDelay + jitter;
 
