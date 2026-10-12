@@ -12,6 +12,11 @@ import java.util.Map;
  * invalidates every cached tile at once.
  */
 public final class MapTiles {
+    /** Answer for tiles with no explored terrain: viewers cache it instead of retrying an error. */
+    public static final String EMPTY_TILE_BASE64 = Base64.getEncoder().encodeToString(
+        PngEncoder.encodeRgba(MapGeometry.TILE_PIXELS, MapGeometry.TILE_PIXELS,
+            new int[MapGeometry.TILE_PIXELS * MapGeometry.TILE_PIXELS]));
+
     private final ChunkRaster raster;
     private final int capacity;
     private final Map<String, String> cache;
@@ -49,7 +54,7 @@ public final class MapTiles {
         return px;
     }
 
-    /** Base64 PNG of a tile, or null when no explored chunk overlaps it. */
+    /** Base64 PNG of a tile; {@link #EMPTY_TILE_BASE64} when no explored chunk overlaps it. */
     public String tileBase64(int zoom, int x, int y) {
         String key = zoom + "/" + x + "/" + y;
         long revision = raster.revision();
@@ -64,7 +69,7 @@ public final class MapTiles {
             }
         }
         if (!hasData(zoom, x, y)) {
-            return null;
+            return EMPTY_TILE_BASE64;
         }
         String png = Base64.getEncoder().encodeToString(
             PngEncoder.encodeRgba(MapGeometry.TILE_PIXELS, MapGeometry.TILE_PIXELS, renderRgba(zoom, x, y)));

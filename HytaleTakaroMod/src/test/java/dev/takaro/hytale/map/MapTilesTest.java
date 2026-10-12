@@ -65,14 +65,22 @@ class MapTilesTest {
     }
 
     @Test
-    void tilesWithoutExploredChunksAreEmpty() {
+    void tilesWithoutExploredChunksAreTransparentPngs() throws Exception {
         ChunkRaster raster = new ChunkRaster();
         raster.put(0, 0, solid(GREEN), 1);
         MapTiles tiles = new MapTiles(raster, 16);
-        assertNotNull(tiles.tileBase64(4, 0, 0));
-        assertNotNull(tiles.tileBase64(0, 0, 0));
-        assertNull(tiles.tileBase64(4, 5, 5));
-        assertNull(tiles.tileBase64(0, -1, -1));
+        assertNotEquals(MapTiles.EMPTY_TILE_BASE64, tiles.tileBase64(4, 0, 0));
+        assertNotEquals(MapTiles.EMPTY_TILE_BASE64, tiles.tileBase64(0, 0, 0));
+        assertEquals(MapTiles.EMPTY_TILE_BASE64, tiles.tileBase64(4, 5, 5));
+        assertEquals(MapTiles.EMPTY_TILE_BASE64, tiles.tileBase64(0, -1, -1));
+        BufferedImage empty = decode(MapTiles.EMPTY_TILE_BASE64);
+        assertEquals(128, empty.getWidth());
+        assertEquals(128, empty.getHeight());
+        for (int y = 0; y < 128; y += 7) {
+            for (int x = 0; x < 128; x += 7) {
+                assertEquals(0, empty.getRGB(x, y) >>> 24);
+            }
+        }
     }
 
     @Test

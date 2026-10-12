@@ -185,11 +185,7 @@ public class TakaroRequestHandler {
             return errorResult("invalid_args: zoom " + zoom + " is outside 0.."
                 + dev.takaro.hytale.map.MapGeometry.MAX_ZOOM);
         }
-        String png = map.tiles().tileBase64(zoom, x, y);
-        if (png == null) {
-            return errorResult("tile_empty: no explored terrain in tile " + zoom + "/" + x + "/" + y);
-        }
-        return png;
+        return map.tiles().tileBase64(zoom, x, y);
     }
 
     private Object handleTestReachability() {
