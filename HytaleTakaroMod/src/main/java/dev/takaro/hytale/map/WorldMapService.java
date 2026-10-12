@@ -12,7 +12,6 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -32,7 +31,9 @@ import java.util.logging.Level;
  *
  * <p>Game-thread cost: the generator reads each chunk's components on the world thread (the
  * engine requires that) and rasterises off it. Batches are small and paced, and only chunks
- * that already exist are drawn (see {@link RenderPlanner}), so no world is generated.
+ * that already exist are drawn (see {@link RenderPlanner}), so no world is generated. While
+ * players are online only already-loaded chunks are drawn; loading the rest of the saved world
+ * (40-500 ms of world-thread work per chunk) waits until the world is empty.
  */
 public final class WorldMapService {
     private static final int BATCH = 16;
@@ -124,9 +125,9 @@ public final class WorldMapService {
 
         long worldKey = world.getWorldConfig().getSeed() * 31 + world.getName().hashCode();
         Path file = dataDir.resolve("worldmap-" + world.getName().replaceAll("[^A-Za-z0-9_.-]", "_") + ".bin");
-        int loaded = raster.load(file, worldKey);
-        if (loaded >= 0) {
-            log(Level.INFO, "Loaded " + loaded + " map chunks from " + file.getFileName());
+        int cached = raster.load(file, worldKey);
+        if (cached >= 0) {
+            log(Level.INFO, "Loaded " + cached + " map chunks from " + file.getFileName());
         }
         int imageSize = Math.max(1, (int) Math.floor(32.0f * world.getWorldMapManager().getWorldMapSettings().getImageScale()));
         ready = true;
@@ -157,13 +158,15 @@ public final class WorldMapService {
                     lastScan = now;
                 }
                 LongSet loadedNow = world.getChunkStore().getChunkIndexes();
-                List<Long> active = new ArrayList<>(loadedNow.size());
+                Set<Long> loaded = new HashSet<>(loadedNow.size() * 2);
                 for (long key : loadedNow) {
-                    active.add(key);
+                    loaded.add(key);
                     existing.add(key);
                 }
 
-                List<Long> plan = RenderPlanner.plan(existing, active, raster, now, REFRESH_AFTER_MS, BATCH * 4);
+                // Saved chunks far from players are only loaded for drawing while nobody plays.
+                boolean idle = world.getPlayerCount() == 0;
+                List<Long> plan = RenderPlanner.plan(existing, loaded, raster, now, REFRESH_AFTER_MS, BATCH * 4, idle);
                 plan.removeIf(key -> {
                     Long failed = failedAt.get(key);
                     return failed != null && now - failed < FAILED_RETRY_MS;

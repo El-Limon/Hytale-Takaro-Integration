@@ -132,7 +132,7 @@ class MapTilesTest {
             }
         }
         ChunkRaster raster = new ChunkRaster();
-        List<Long> plan = RenderPlanner.plan(existing, List.of(), raster, 0, 1000, 100);
+        List<Long> plan = RenderPlanner.plan(existing, Set.of(), raster, 0, 1000, 100, true);
         // Only the inner 3x3 has all eight neighbours; the border ring would make the
         // generator create new chunks.
         assertEquals(9, plan.size());
@@ -153,8 +153,33 @@ class MapTilesTest {
         ChunkRaster raster = new ChunkRaster();
         raster.put(0, 0, solid(GREEN), 1_000);
         long centre = ChunkRaster.key(0, 0);
-        assertTrue(RenderPlanner.plan(existing, List.of(centre), raster, 1_500, 1_000, 10).isEmpty());
-        assertEquals(List.of(centre), RenderPlanner.plan(existing, List.of(centre), raster, 2_000, 1_000, 10));
-        assertTrue(RenderPlanner.plan(existing, List.of(), raster, 2_000, 1_000, 10).isEmpty());
+        // All nine chunks are loaded (a player stands here).
+        assertTrue(RenderPlanner.plan(existing, existing, raster, 1_500, 1_000, 10, false).isEmpty());
+        assertEquals(List.of(centre), RenderPlanner.plan(existing, existing, raster, 2_000, 1_000, 10, false));
+        assertTrue(RenderPlanner.plan(existing, Set.of(), raster, 2_000, 1_000, 10, false).isEmpty());
+        // A loaded chunk whose neighbour is unloaded would load it: not refreshed.
+        Set<Long> partly = new HashSet<>(existing);
+        partly.remove(ChunkRaster.key(1, 1));
+        assertTrue(RenderPlanner.plan(existing, partly, raster, 2_000, 1_000, 10, false).isEmpty());
+    }
+
+    @Test
+    void plannerLoadsUnloadedChunksOnlyWhileTheWorldIsEmpty() {
+        Set<Long> existing = new HashSet<>();
+        for (int x = -3; x <= 3; x++) {
+            for (int z = -3; z <= 3; z++) {
+                existing.add(ChunkRaster.key(x, z));
+            }
+        }
+        // A player near (2, 2) keeps chunks 1..3 loaded; only (2, 2) has its whole 3x3 loaded.
+        Set<Long> loaded = new HashSet<>();
+        for (int x = 1; x <= 3; x++) {
+            for (int z = 1; z <= 3; z++) {
+                loaded.add(ChunkRaster.key(x, z));
+            }
+        }
+        ChunkRaster raster = new ChunkRaster();
+        assertEquals(List.of(ChunkRaster.key(2, 2)), RenderPlanner.plan(existing, loaded, raster, 0, 1000, 100, false));
+        assertEquals(25, RenderPlanner.plan(existing, loaded, raster, 0, 1000, 100, true).size());
     }
 }
