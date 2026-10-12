@@ -26,7 +26,7 @@ import java.util.zip.GZIPOutputStream;
  */
 public final class ChunkRaster {
     private static final int MAGIC = 0x544B4D50; // "TKMP"
-    private static final int FORMAT_VERSION = 1;
+    private static final int FORMAT_VERSION = 2;
     public static final int CELLS = MapGeometry.CHUNK_SIZE * MapGeometry.CHUNK_SIZE;
 
     /** A rendered chunk: its pixels and when it was rendered (epoch millis). */
@@ -57,6 +57,21 @@ public final class ChunkRaster {
         chunks.put(key(chunkX, chunkZ), new Entry(pixels, renderedAt));
         revision.incrementAndGet();
         dirty = true;
+    }
+
+    /**
+     * Drop every chunk whose key is not in {@code keep} (chunks no longer in the save, for example
+     * after the world's chunks were wiped). Returns how many were dropped.
+     */
+    public int retainOnly(java.util.Set<Long> keep) {
+        int before = chunks.size();
+        chunks.keySet().removeIf(k -> !keep.contains(k));
+        int dropped = before - chunks.size();
+        if (dropped > 0) {
+            revision.incrementAndGet();
+            dirty = true;
+        }
+        return dropped;
     }
 
     public Entry get(int chunkX, int chunkZ) {
@@ -129,8 +144,11 @@ public final class ChunkRaster {
         return dirty;
     }
 
-    /** Write the raster atomically (temp file + move). {@code worldKey} ties it to one world. */
-    public void save(Path file, long worldKey) throws IOException {
+    /**
+     * Write the raster atomically (temp file + move). {@code worldId} ties it to one world
+     * instance (the world's own UUID, which a re-created world does not share).
+     */
+    public void save(Path file, String worldId) throws IOException {
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         dirty = false;
         try (OutputStream raw = Files.newOutputStream(tmp);
@@ -138,7 +156,7 @@ public final class ChunkRaster {
             Map<Long, Entry> snapshot = Map.copyOf(chunks);
             out.writeInt(MAGIC);
             out.writeInt(FORMAT_VERSION);
-            out.writeLong(worldKey);
+            out.writeUTF(worldId);
             out.writeInt(snapshot.size());
             for (Map.Entry<Long, Entry> e : snapshot.entrySet()) {
                 out.writeLong(e.getKey());
@@ -156,15 +174,19 @@ public final class ChunkRaster {
 
     /**
      * Load a raster saved by {@link #save}. Returns the number of chunks loaded, or -1 when the
-     * file is missing, unreadable or belongs to another world (the raster is left empty then).
+     * file is missing, unreadable, from an older format or belongs to another world (the raster
+     * is left empty then).
+     *
+     * <p>Loaded chunks count as rendered at time 0: the world may have changed while the server
+     * was down, so chunks near players are redrawn as soon as they are loaded.
      */
-    public int load(Path file, long worldKey) {
+    public int load(Path file, String worldId) {
         if (!Files.isRegularFile(file)) {
             return -1;
         }
         try (InputStream raw = Files.newInputStream(file);
              DataInputStream in = new DataInputStream(new BufferedInputStream(new GZIPInputStream(raw)))) {
-            if (in.readInt() != MAGIC || in.readInt() != FORMAT_VERSION || in.readLong() != worldKey) {
+            if (in.readInt() != MAGIC || in.readInt() != FORMAT_VERSION || !in.readUTF().equals(worldId)) {
                 return -1;
             }
             int count = in.readInt();
@@ -174,12 +196,12 @@ public final class ChunkRaster {
             Map<Long, Entry> loaded = new java.util.HashMap<>(count * 2);
             for (int i = 0; i < count; i++) {
                 long key = in.readLong();
-                long renderedAt = in.readLong();
+                in.readLong(); // renderedAt from the earlier run
                 int[] pixels = new int[CELLS];
                 for (int p = 0; p < CELLS; p++) {
                     pixels[p] = in.readInt();
                 }
-                loaded.put(key, new Entry(pixels, renderedAt));
+                loaded.put(key, new Entry(pixels, 0));
             }
             chunks.putAll(loaded);
             revision.incrementAndGet();

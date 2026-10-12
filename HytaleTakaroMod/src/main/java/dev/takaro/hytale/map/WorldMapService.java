@@ -123,7 +123,9 @@ public final class WorldMapService {
             return;
         }
 
-        long worldKey = world.getWorldConfig().getSeed() * 31 + world.getName().hashCode();
+        // The world's UUID is random per world creation and kept in its config.json, so a world
+        // re-created with the same name and seed does not reuse the old drawings.
+        String worldKey = world.getWorldConfig().getUuid() + ":" + world.getWorldConfig().getSeed();
         Path file = dataDir.resolve("worldmap-" + world.getName().replaceAll("[^A-Za-z0-9_.-]", "_") + ".bin");
         int cached = raster.load(file, worldKey);
         if (cached >= 0) {
@@ -153,8 +155,13 @@ public final class WorldMapService {
                 generator = current;
                 status = "ready";
 
+                boolean scanned = false;
                 if (now - lastScan >= SCAN_EVERY_MS) {
-                    existing = scanExisting(world);
+                    Set<Long> saved = scanExisting(world);
+                    if (saved != null) {
+                        existing = saved;
+                        scanned = true;
+                    }
                     lastScan = now;
                 }
                 LongSet loadedNow = world.getChunkStore().getChunkIndexes();
@@ -162,6 +169,14 @@ public final class WorldMapService {
                 for (long key : loadedNow) {
                     loaded.add(key);
                     existing.add(key);
+                }
+                if (scanned) {
+                    // Chunks deleted from the save (a chunk wipe keeps the world's UUID) must not
+                    // keep their old drawing next to freshly generated ones.
+                    int dropped = raster.retainOnly(existing);
+                    if (dropped > 0) {
+                        log(Level.INFO, "Dropped " + dropped + " map chunks that are no longer in the save");
+                    }
                 }
 
                 // Saved chunks far from players are only loaded for drawing while nobody plays.
@@ -214,6 +229,7 @@ public final class WorldMapService {
         }
     }
 
+    /** Keys of every chunk in the world's save, or null when the save cannot be listed. */
     private Set<Long> scanExisting(World world) {
         Set<Long> keys = new HashSet<>();
         try {
@@ -223,6 +239,7 @@ public final class WorldMapService {
             }
         } catch (Exception e) {
             log(Level.WARNING, "Could not list saved chunks: " + e);
+            return null;
         }
         return keys;
     }
@@ -249,7 +266,7 @@ public final class WorldMapService {
         return drawn;
     }
 
-    private void save(Path file, long worldKey) {
+    private void save(Path file, String worldKey) {
         try {
             raster.save(file, worldKey);
         } catch (Exception e) {

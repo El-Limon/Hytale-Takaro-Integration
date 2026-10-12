@@ -101,18 +101,78 @@ class MapTilesTest {
         ChunkRaster raster = new ChunkRaster();
         raster.put(-3, 7, solid(MARK), 42);
         Path file = dir.resolve("worldmap-default.bin");
-        raster.save(file, 99);
+        raster.save(file, "1495...-a:99");
         assertFalse(raster.isDirty());
 
         ChunkRaster copy = new ChunkRaster();
-        assertEquals(1, copy.load(file, 99));
+        assertEquals(1, copy.load(file, "1495...-a:99"));
         assertEquals(MARK, copy.pixelAt(-3 * 32 + 4, 7 * 32 + 9));
-        assertEquals(42, copy.get(-3, 7).renderedAt());
+        // Drawings from an earlier run count as stale, so loaded chunks are redrawn at once.
+        assertEquals(0, copy.get(-3, 7).renderedAt());
 
-        ChunkRaster other = new ChunkRaster();
-        assertEquals(-1, other.load(file, 100));
-        assertEquals(0, other.size());
-        assertEquals(-1, other.load(dir.resolve("missing.bin"), 99));
+        // A world re-created with the same name and seed has a new UUID: nothing is reused.
+        ChunkRaster recreated = new ChunkRaster();
+        assertEquals(-1, recreated.load(file, "77aa...-b:99"));
+        assertEquals(0, recreated.size());
+        assertEquals(-1, recreated.load(dir.resolve("missing.bin"), "1495...-a:99"));
+    }
+
+    @Test
+    void cacheFromTheOldSeedKeyedFormatIsDiscarded(@TempDir Path dir) throws Exception {
+        // Format 1 (elimon.15) keyed the file by seed*31 + name hash only.
+        Path file = dir.resolve("worldmap-default.bin");
+        try (java.io.DataOutputStream out = new java.io.DataOutputStream(
+            new java.util.zip.GZIPOutputStream(java.nio.file.Files.newOutputStream(file)))) {
+            out.writeInt(0x544B4D50);
+            out.writeInt(1);
+            out.writeLong(99L * 31 + "default".hashCode());
+            out.writeInt(1);
+            out.writeLong(ChunkRaster.key(0, 0));
+            out.writeLong(5);
+            for (int i = 0; i < ChunkRaster.CELLS; i++) {
+                out.writeInt(GREEN);
+            }
+        }
+        ChunkRaster raster = new ChunkRaster();
+        assertEquals(-1, raster.load(file, "1495...-a:99"));
+        assertEquals(0, raster.size());
+    }
+
+    @Test
+    void chunksWipedFromTheSaveLoseTheirDrawing() throws Exception {
+        ChunkRaster raster = new ChunkRaster();
+        raster.put(0, 0, solid(GREEN), 1);
+        raster.put(40, 40, solid(MARK), 1);
+        MapTiles tiles = new MapTiles(raster, 16);
+        int[] far = MapGeometry.locate(4, 40 * 32 + 0.5, 40 * 32 + 0.5);
+        assertNotEquals(MapTiles.EMPTY_TILE_BASE64, tiles.tileBase64(4, far[0], far[1]));
+
+        // After a chunk wipe only the spawn area is in the save again.
+        assertEquals(1, raster.retainOnly(Set.of(ChunkRaster.key(0, 0), ChunkRaster.key(1, 0))));
+        assertTrue(raster.isDirty());
+        assertNull(raster.get(40, 40));
+        assertNotNull(raster.get(0, 0));
+        assertEquals(MapTiles.EMPTY_TILE_BASE64, tiles.tileBase64(4, far[0], far[1]), "cached tile dropped too");
+        assertEquals(0, raster.retainOnly(Set.of(ChunkRaster.key(0, 0))));
+    }
+
+    @Test
+    void reloadedChunksNearPlayersAreRedrawnImmediately(@TempDir Path dir) throws Exception {
+        Set<Long> block = new HashSet<>();
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                block.add(ChunkRaster.key(x, z));
+            }
+        }
+        ChunkRaster raster = new ChunkRaster();
+        raster.put(0, 0, solid(GREEN), 1_760_000_000_000L);
+        Path file = dir.resolve("worldmap-default.bin");
+        raster.save(file, "w:1");
+        ChunkRaster reloaded = new ChunkRaster();
+        reloaded.load(file, "w:1");
+        // Five minutes have not passed since the drawing, but it comes from the earlier run.
+        assertEquals(List.of(ChunkRaster.key(0, 0)),
+            RenderPlanner.plan(block, block, reloaded, 1_760_000_000_500L, 300_000, 10, false));
     }
 
     @Test
