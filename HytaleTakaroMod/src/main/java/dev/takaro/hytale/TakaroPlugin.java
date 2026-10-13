@@ -13,10 +13,14 @@ import dev.takaro.hytale.api.HytaleApiClient;
 import dev.takaro.hytale.commands.TakaroDebugCommand;
 import dev.takaro.hytale.config.TakaroConfig;
 import dev.takaro.hytale.events.ChatEventListener;
+import dev.takaro.hytale.events.EntityDeathSystem;
+import dev.takaro.hytale.events.ProjectileWeaponSystem;
+import dev.takaro.hytale.events.ModernProjectileWeaponSystem;
 import dev.takaro.hytale.events.PlayerDeathSystem;
 import dev.takaro.hytale.events.PlayerEventListener;
 import dev.takaro.hytale.events.TakaroLogHandler;
 import dev.takaro.hytale.handlers.TakaroRequestHandler;
+import dev.takaro.hytale.state.KnownPlayers;
 import dev.takaro.hytale.websocket.TakaroWebSocket;
 
 import javax.annotation.Nonnull;
@@ -34,7 +38,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class TakaroPlugin extends JavaPlugin {
-    private static final String VERSION = "1.14.6";
+    private static final String VERSION = "1.14.6-elimon.16";
     private static final String HYTALECHARTS_API_URL = "https://hytalecharts.com/api/heartbeat";
     private static final int HEARTBEAT_INTERVAL_SECONDS = 300; // 5 minutes
 
@@ -46,7 +50,12 @@ public class TakaroPlugin extends JavaPlugin {
     private ChatEventListener chatListener;
     private PlayerEventListener playerListener;
     private PlayerDeathSystem deathSystem;
+    private EntityDeathSystem entityDeathSystem;
+    private ProjectileWeaponSystem projectileWeaponSystem;
     private TakaroLogHandler logHandler;
+    private KnownPlayers knownPlayers;
+    private java.util.concurrent.ExecutorService requestExecutor;
+    private dev.takaro.hytale.map.WorldMapService worldMap;
     private ScheduledExecutorService telemetryScheduler;
 
     // HytaleCharts integration
@@ -70,6 +79,10 @@ public class TakaroPlugin extends JavaPlugin {
         File configFile = getFile().getParent().resolve("HytaleTakaroMod").resolve("TakaroConfig.properties").toFile();
         config = new TakaroConfig(configFile);
 
+        // Ledger of players this server has seen, so offline lookups and listBans can
+        // answer with a real name instead of nothing.
+        knownPlayers = new KnownPlayers(configFile.toPath().resolveSibling("known-players.json"));
+
         // Initialize Hytale API client (hidden feature - optional)
         hytaleApi = new HytaleApiClient(this, config.getHytaleApiUrl());
         if (!config.getHytaleApiToken().isEmpty()) {
@@ -85,10 +98,22 @@ public class TakaroPlugin extends JavaPlugin {
         // Initialize request handler
         requestHandler = new TakaroRequestHandler(this, hytaleApi);
 
+        // Requests run here, never on the WebSocket reader thread.
+        requestExecutor = new java.util.concurrent.ThreadPoolExecutor(
+            2, 8, 60L, TimeUnit.SECONDS,
+            new java.util.concurrent.LinkedBlockingQueue<>(256),
+            r -> {
+                Thread t = new Thread(r, "Takaro-Request");
+                t.setDaemon(true);
+                return t;
+            });
+
         // Initialize event listeners
         chatListener = new ChatEventListener(this);
         playerListener = new PlayerEventListener(this);
         deathSystem = new PlayerDeathSystem(this);
+        projectileWeaponSystem = new ProjectileWeaponSystem(this);
+        entityDeathSystem = new EntityDeathSystem(this, projectileWeaponSystem);
         logHandler = new TakaroLogHandler(this);
 
         // Register events (official pattern)
@@ -119,12 +144,12 @@ public class TakaroPlugin extends JavaPlugin {
             );
             getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerChatEvent handler");
 
-            // Register player connect event
+            // Notify Takaro only once the player has a world entity and a readable position.
             this.getEventRegistry().registerGlobal(
-                com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent.class,
-                playerListener::onPlayerConnect
+                com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent.class,
+                playerListener::onPlayerReady
             );
-            getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerConnectEvent handler");
+            getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerReadyEvent handler");
 
             // Register player disconnect event
             this.getEventRegistry().registerGlobal(
@@ -147,6 +172,15 @@ public class TakaroPlugin extends JavaPlugin {
             // Register player death system with entity store registry
             this.getEntityStoreRegistry().registerSystem(deathSystem);
             getLogger().at(java.util.logging.Level.INFO).log("Registered PlayerDeathSystem");
+
+            this.getEntityStoreRegistry().registerSystem(projectileWeaponSystem);
+            getLogger().at(java.util.logging.Level.INFO).log("Registered ProjectileWeaponSystem");
+
+            this.getEntityStoreRegistry().registerSystem(new ModernProjectileWeaponSystem(projectileWeaponSystem));
+            getLogger().at(java.util.logging.Level.INFO).log("Registered ModernProjectileWeaponSystem");
+
+            this.getEntityStoreRegistry().registerSystem(entityDeathSystem);
+            getLogger().at(java.util.logging.Level.INFO).log("Registered EntityDeathSystem (entity-killed)");
 
         } catch (Exception e) {
             getLogger().at(java.util.logging.Level.SEVERE).log("Failed to register ECS systems: " + e.getMessage());
@@ -202,6 +236,12 @@ public class TakaroPlugin extends JavaPlugin {
 
         // Start log forwarding to Takaro
         logHandler.start();
+
+        // Draw the world map for getMapInfo/getMapTile in the background
+        if (config.isMapEnabled()) {
+            worldMap = new dev.takaro.hytale.map.WorldMapService(this, getFile().getParent().resolve("HytaleTakaroMod"));
+            worldMap.start();
+        }
     }
 
     private void reportTelemetry() {
@@ -223,11 +263,18 @@ public class TakaroPlugin extends JavaPlugin {
      * Start HytaleCharts integration - heartbeat and promo links
      */
     private void startHytaleCharts() {
+        // HytaleCharts is strictly opt-in. No secret means no third-party traffic and no
+        // nagging: an operator who has not asked for it should not be told about it on every
+        // boot, and must never have player names and UUIDs sent anywhere by default (F3).
         String secret = config.getHytaleChartsSecret();
-        if (secret == null || secret.isEmpty() || secret.equals("YOUR_SECRET_HERE")) {
-            getLogger().at(java.util.logging.Level.WARNING).log("HytaleCharts not configured! Generate a heartbeat secret at hytalecharts.com");
+        if (secret == null || secret.trim().isEmpty() || secret.equals("YOUR_SECRET_HERE")) {
+            getLogger().at(java.util.logging.Level.FINE).log("HytaleCharts disabled (no HYTALECHARTS_SECRET set)");
             return;
         }
+        getLogger().at(java.util.logging.Level.INFO).log(
+            "HytaleCharts is ENABLED - this server will send its player list (usernames and UUIDs) "
+                + "to hytalecharts.com every " + HEARTBEAT_INTERVAL_SECONDS + "s. "
+                + "Clear HYTALECHARTS_SECRET to turn it off.");
 
         hytaleChartsScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "HytaleCharts-Heartbeat");
@@ -433,6 +480,14 @@ public class TakaroPlugin extends JavaPlugin {
             logHandler.stop();
         }
 
+        if (requestExecutor != null) {
+            requestExecutor.shutdownNow();
+        }
+
+        if (worldMap != null) {
+            worldMap.stop();
+        }
+
         if (telemetryScheduler != null) {
             telemetryScheduler.shutdownNow();
         }
@@ -454,8 +509,22 @@ public class TakaroPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * Handle a Takaro request off the WebSocket reader thread.
+     *
+     * <p>Several handlers hand work to a world thread and block on a future while waiting for
+     * the result. Doing that on the reader thread stalls ping/pong and every other request for
+     * the duration; a slow or stuck world would look to Takaro like a dead server. The work is
+     * therefore dispatched to a small bounded pool, and the reader thread returns immediately.
+     */
     public void handleTakaroRequest(TakaroWebSocket sourceWebSocket, String requestId, String action, JsonObject payload) {
-        requestHandler.handleRequest(sourceWebSocket, requestId, action, payload);
+        try {
+            requestExecutor.execute(() -> requestHandler.handleRequest(sourceWebSocket, requestId, action, payload));
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            getLogger().at(java.util.logging.Level.SEVERE).log(
+                "Request executor is saturated, running '" + action + "' inline: " + e.getMessage());
+            requestHandler.handleRequest(sourceWebSocket, requestId, action, payload);
+        }
     }
 
     public TakaroWebSocket getWebSocket() {
@@ -464,6 +533,19 @@ public class TakaroPlugin extends JavaPlugin {
 
     public TakaroWebSocket getDevWebSocket() {
         return devWebSocket;
+    }
+
+    /** The world map service, or null when MAP_ENABLED=false. */
+    public dev.takaro.hytale.map.WorldMapService getWorldMap() {
+        return worldMap;
+    }
+
+    public KnownPlayers getKnownPlayers() {
+        return knownPlayers;
+    }
+
+    public PlayerEventListener getPlayerListener() {
+        return playerListener;
     }
 
     public TakaroConfig getConfig() {

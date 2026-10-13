@@ -44,7 +44,7 @@ public class ChatEventListener {
             Map<String, String> player = new HashMap<>();
             player.put("name", playerName);
             player.put("gameId", uuid);
-            player.put("steamId", uuid); // Using UUID as steamId for now
+            player.put("platformId", "hytale:" + uuid); // Hytale account UUID; never a Steam id
 
             chatData.put("player", player);
 

@@ -42,7 +42,7 @@ public class PlayerEventListener {
             Map<String, String> player = new HashMap<>();
             player.put("name", playerName);
             player.put("gameId", uuid);
-            player.put("steamId", uuid); // Using UUID as steamId
+            player.put("platformId", "hytale:" + uuid); // Hytale account UUID; never a Steam id
 
             eventData.put("player", player);
 
@@ -80,7 +80,7 @@ public class PlayerEventListener {
             Map<String, String> player = new HashMap<>();
             player.put("name", playerName);
             player.put("gameId", uuid);
-            player.put("steamId", uuid); // Using UUID as steamId
+            player.put("platformId", "hytale:" + uuid); // Hytale account UUID; never a Steam id
 
             eventData.put("player", player);
 

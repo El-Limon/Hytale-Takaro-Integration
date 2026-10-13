@@ -4,21 +4,181 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
-## ⚠️ IMPORTANT: Configuration File Changes
+## 1.14.6-elimon.14
 
-**The configuration file has changed location and format!**
+### Diagnostics
+- `TAKARO_DEBUG=true` now also logs the player identity fields of every outgoing frame
+  (`ids=[gameId=… platformId=hytale:…]` on `player-connected`, `chat-message`, deaths, kills and the
+  `getPlayers`/`getPlayer` responses). Takaro matches players only on those explicit fields, so this
+  shows on the connector side exactly what identity was sent. Chat text and other payload content
+  are not logged.
 
-**Old Location:** `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/HytaleTakaroMod/TakaroConfig.properties`
+### Legacy tree
+- The unbuilt repository-root plugin (`src/`) sent the Hytale account UUID as `steamId` on connect,
+  disconnect and chat. It now sends `platformId: hytale:<uuid>` like the shipped plugin.
 
-**New Location:** `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/TakaroConfig.properties`
+## 1.14.6-elimon.5
 
-### Migration Steps:
-1. **Copy your old config file** from the HytaleTakaroMod subdirectory to the mods folder directly
-2. **Transfer your settings**:
-   - Copy your `IDENTITY_TOKEN` value
-   - Copy your `REGISTRATION_TOKEN` value
-3. **Delete the old config** and HytaleTakaroMod subdirectory
-4. **The new config will be auto-created** on first run with new settings (COMMAND_PREFIX, COMMAND_RESPONSE)
+### Console
+- **F15** - `executeConsoleCommand` returned clean but incomplete output: `/help` came back as
+  its header line alone and `/who` as "Command executed (no output)". The cause was not that
+  these commands log their body - both write it to their `CommandSender` - but that
+  `Message.getAnsiMessage()` resolves the translation and its params while dropping the
+  message's *children*, which is exactly where `Message.insert(...)` attaches a command's body.
+  Output is now rendered with `MessageUtil.formatMessageToPlainString`, the plain-text twin of
+  what Hytale's own `ConsoleSender` uses.
+  A second, thread-scoped capture half picks up commands that really do log instead of
+  replying: log records are admitted only when `LogRecord.getLongThreadID()` matches a thread
+  known to be executing *that* command (`CommandManager.handleCommand` runs it on
+  `ForkJoinPool.commonPool()` and calls `CommandSender.getUsername()` before parsing, so the
+  sender registers the thread first thing). The global log stream is never taken - that was F7.
+  Both halves are merged, de-duplicated, stripped of `CommandManager`'s own
+  "... executed command: ..." echo and of the connector's own loggers, and capped at 400 lines
+  / 16000 characters.
+- New optional key `COMMAND_SETTLE_MS` (default `0`, capped at `2000`) for a command known to
+  answer asynchronously.
+
+### Catalogue
+- **F18** - `listEntities` named every row after the role id (`Bat_Ice`, `Cow_Calf`,
+  `Rex_Cave`), because `BuilderRole.getDisplayNames()` carries nothing for most roles. Hytale
+  keeps the player-facing names in its i18n table instead - 574 `npcRoles.<Role>.name` entries
+  in `Server/Languages/en-US/server.lang` ("Ice Bat", "Calf", "Cave Rex") - and that is now the
+  first source, followed by the builder and only then a humanised role id.
+- `Static`, `Static2`-`Static4`, `Template`, `BlankTemplate` and `Empty_Role` are engine
+  scaffolding, not entities, and are no longer listed.
+
+### Players
+- **F19** - `getPlayer` for a game id the server has never seen returned an error frame. Takaro
+  rejects every "no player" answer to that action and shows the operator an HTTP 400 blaming
+  their mod version; it now answers with a minimal `IGamePlayer` synthesised from the requested
+  id (`online: false`).
+
+---
+
+## 1.14.6-elimon.4
+
+### Catalogue
+- **F17** - `listEntities` reported `type: "npc"` for every row. Takaro validates
+  `IEntityDTO.type` as an enum (`hostile` | `friendly` | `neutral`) and rejected the entire
+  response with `property type has failed the following constraints: isEnum`, so `syncEntities`
+  ran, the connector answered 450 roles, and Takaro's entity catalogue stayed at **0** rows.
+  Hytale 0.6.8 has no faction or category field on a role template, so the key is now simply
+  omitted rather than invented.
+
+---
+
+## 1.14.6-elimon.3
+
+### Moderation
+- **F16** - `listBans` sent `player.name: null` for a ban whose target is not in the
+  `known-players.json` ledger (any ban issued by UUID, and every ban that predates the ledger).
+  Takaro validates `BanDTO.player.name` with `isString` and rejected the **entire** response:
+  `gameserverListBans` answered HTTP 400 "The gameserver responded with bad data, please verify
+  that the mod is up to date" while the ban was correctly stored in Hytale's `bans.json`.
+  `player.name` now falls back to the gameId and is never null.
+
+---
+
+## 1.14.6-elimon.2
+
+Found during the live re-proof of `1.14.6-elimon.1` on a real Hytale 0.6.8 server.
+
+### Moderation
+- **F14** - every `takaro <sub>` console helper that takes a player (`banplayer`, `unbanplayer`,
+  `kickplayer`, `getplayerlocation`, `getplayerinventory`, `give`, `tp`, `tpp`, `setcolor`, `beds`)
+  resolved its argument by **online username only**, so `takaro banplayer <uuid>` answered
+  `Player not found` and offline moderation from the console was impossible - exactly the case the
+  new offline `banPlayer` implementation was written for. The argument is now resolved as
+  UUID -> online username -> the `known-players.json` ledger.
+
+---
+
+## 1.14.6-elimon.1
+
+Fix pass following a hard test of `mad-001/Hytale-Takaro-Integration` @ `ba872f1` against a real
+Hytale **0.6.8** dedicated server. **None of these fixes has been re-proven live yet** - see the
+status table in the README.
+
+### Compatibility
+- Compiles against Hytale 0.6.8 again. Upstream's last functional commit (2026-01-31) failed with
+  72 javac errors across 24 call sites: `org.joml` vectors replacing `com.hypixel.hytale.math.vector`,
+  `Universe.getPlayers()` returning a `Collection`, `PacketHandler.getChannel()` returning a
+  `ChannelConnection`, `disconnect(Message)`, `Teleport`'s `Rotation3fc` rotation,
+  `CommandSender.getUsername()`, and the removal of `Inventory.getCombinedEverything()`.
+- `getPlayerInventory` covers all six inventory sections again (armor, hotbar, utility, storage,
+  backpack, tools) by building a `CombinedItemContainer` explicitly.
+- Manifest `ServerVersion` is now `>=0.6.8` and matches the pom version.
+
+### Moderation
+- `banPlayer` / `unbanPlayer` were stubs that always returned `success:true`; `listBans` returned `[]`.
+  All three are now real, on Hytale's `AccessControlModule`: offline bans by UUID, `expiresAt` honoured,
+  the target kicked if online, and the state read back before success is reported.
+- `shutdown` is handled (it previously fell through to "Unknown action").
+
+### Correctness
+- `executeConsoleCommand` always returns a string `rawResult`. Six shortcut names used to return the
+  raw action payload, which Takaro rejected with a 400.
+- Takaro's console helpers moved to a `takaro <sub>` namespace so they can no longer shadow real
+  Hytale commands.
+- Console output is captured per invocation via a capturing `CommandSender` instead of subscribing to
+  the global server logger, so another user's output can no longer be returned as yours.
+- An unknown console command now returns `success:false` with the game's own message.
+- Every optional argument goes through one null-safe helper: an explicit JSON `null` from a module no
+  longer throws. `giveItem` honours `amount` and reports an unsettable `quality` instead of dropping it.
+- `getPlayerLocation` no longer answers `0,0,0` on failure, and `getPlayerInventory` no longer answers
+  `[]` on failure.
+- `getPlayer` answers for offline players from a persisted known-players ledger.
+- `getServerInfo` reports the real MOTD, version and player counts.
+
+### Reliability
+- Game events produced while Takaro is unreachable are queued (`EVENT_QUEUE_SIZE`, default 1000) and
+  flushed after re-identify, instead of being dropped. Oldest-first drop with a logged counter.
+- A rejected identify is retried with backoff and the real reason is logged, instead of silently ending
+  all reconnect attempts. The config file is re-read before every attempt.
+- Connection logging reflects reality (socket-open vs identified).
+- Requests run on their own bounded pool, not on the WebSocket reader thread.
+- The disconnect-dedupe map and the log-forward buffer are bounded; the log buffer no longer drains
+  quadratically.
+
+### Observability
+- `TAKARO_DEBUG=true` logs every frame with its `requestId` at INFO, through a logger that is excluded
+  from log forwarding - which is what makes it safe (raising the old FINE logging would have created a
+  log -> gameEvent -> log amplification loop).
+- `LOG_FORWARD_LEVEL` and `LOG_FORWARD_MAX_PER_MIN` bound log forwarding.
+
+### Content
+- `entity-killed` is emitted when a player kills a mob, with the killer attributed; player deaths caused
+  by another player now carry an `attacker`. Hytale 0.6.8 records no weapon, so `weapon` is empty.
+- `listEntities` returns spawnable NPC role templates with display names.
+- `listLocations` returns the server's named warps.
+- `listItems` filters `Debug_*`/`Test_*`/`Dev_*` (`CATALOG_INCLUDE_DEBUG=true` keeps them) and includes
+  descriptions where a translation exists.
+
+### Privacy
+- HytaleCharts is strictly opt-in: no secret placeholder, promo-on-login off, no boot-time nag, and one
+  explicit line stating what is sent when it IS enabled.
+
+### Docs
+- README rewritten as a what-works / what-does-not table plus exact install steps and every config key.
+- The config path documented here now matches the code.
+
+---
+
+## Configuration file location
+
+The config file is created and read at:
+
+```
+<mods folder>/HytaleTakaroMod/TakaroConfig.properties
+```
+
+- Dedicated server: `<server directory>/mods/HytaleTakaroMod/TakaroConfig.properties`
+- Client-hosted world: `AppData/Roaming/Hytale/UserData/Saves/<WorldName>/mods/HytaleTakaroMod/TakaroConfig.properties`
+
+An earlier entry in this file announced a move to `mods/TakaroConfig.properties`. That move
+never happened in the code (`TakaroPlugin.setup()` has always resolved the `HytaleTakaroMod`
+subdirectory), so anyone who followed it edited a file the mod never reads. The documented
+path now matches the code, and the code is unchanged so existing installs keep working.
 
 ### ⚠️ CRITICAL WARNING - DEV Configuration
 **DO NOT ENABLE DEV CONFIGURATION UNLESS YOU ARE A DEVELOPER!**
@@ -57,7 +217,7 @@ All notable features added to the Hytale-Takaro Integration Mod.
 - **Command Interception**: Commands no longer appear in public chat (behaves like Hytale's `/` commands)
 
 ### Changed
-- **Configuration File Location**: Moved from `mods/HytaleTakaroMod/TakaroConfig.properties` to `mods/TakaroConfig.properties` (see migration steps above)
+- **Configuration File Location**: documented as `mods/TakaroConfig.properties`. This was never true - the code always used `mods/HytaleTakaroMod/TakaroConfig.properties`. Corrected at the top of this file.
 
 ## [1.11.3] - 2026-01-19
 

@@ -2,6 +2,11 @@
 
 All notable changes to the Hytale-Takaro Integration mod will be documented in this file.
 
+## [1.14.6-elimon.6] - 2026-09-22
+
+- Forward `player-connected` after Hytale's `PlayerReadyEvent`, when the player has a valid world entity. This prevents Takaro's immediate location lookup from racing world entry.
+- Forward the event once per connected player and clear that state on disconnect.
+
 ## [1.4.1] - 2026-01-17
 
 ### Added
