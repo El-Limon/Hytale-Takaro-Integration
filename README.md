@@ -28,6 +28,7 @@ a real client. Treat the table as "implemented, not yet proven".
 | `getServerInfo` | ⚠️ needs live test | Real MOTD, real Hytale version, player counts |
 | `getPlayerLocation` | ⚠️ needs live test | Failures return an error, not `0,0,0` |
 | `getPlayerInventory` | ⚠️ needs live test | All six inventory sections; failures return an error, not `[]` |
+| Player levels and skills | ❌ | Hytale has no per-player level, experience or skills; Memories progress belongs to the whole world. |
 | `getPlayerBedLocation` | ⚠️ needs live test | Respawn points, read reflectively |
 | `giveItem` | ⚠️ needs live test | Honours `amount`; `quality` is echoed back as `qualityIgnored` (see limits) |
 | `teleportPlayer` / `teleportPlayerToPlayer` | ⚠️ needs live test | Rejects missing/non-numeric coordinates |
