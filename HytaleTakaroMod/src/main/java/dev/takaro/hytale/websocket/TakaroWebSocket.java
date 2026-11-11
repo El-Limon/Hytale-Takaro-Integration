@@ -3,6 +3,7 @@ package dev.takaro.hytale.websocket;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import dev.takaro.hytale.TakaroPlugin;
+import dev.takaro.hytale.config.ConnectionTarget;
 import dev.takaro.hytale.config.TakaroConfig;
 import dev.takaro.hytale.state.BoundedEventQueue;
 import org.java_websocket.client.WebSocketClient;
@@ -19,7 +20,6 @@ public class TakaroWebSocket extends WebSocketClient {
     private final TakaroPlugin plugin;
     private final TakaroConfig config;
     private final Gson gson;
-    private final boolean isDev; // true for dev Takaro, false for production
     private boolean isIdentified = false;
     private int reconnectAttempts = 0;
     private static final int MAX_RECONNECT_DELAY = 60000; // 60 seconds
@@ -36,11 +36,10 @@ public class TakaroWebSocket extends WebSocketClient {
     private long lastDropLogAt = 0L;
     private static final long DROP_LOG_INTERVAL_MS = 30_000L;
 
-    public TakaroWebSocket(TakaroPlugin plugin, TakaroConfig config, boolean isDev) throws Exception {
-        super(new URI(isDev ? config.getDevWsUrl() : config.getWsUrl()));
+    public TakaroWebSocket(TakaroPlugin plugin, TakaroConfig config) throws Exception {
+        super(new URI(config.getConnectionTarget().url()));
         this.plugin = plugin;
         this.config = config;
-        this.isDev = isDev;
         this.gson = new Gson();
         this.pendingEvents = new BoundedEventQueue<>(config.getEventQueueSize());
     }
@@ -112,7 +111,7 @@ public class TakaroWebSocket extends WebSocketClient {
     }
 
     private String getLogPrefix() {
-        return isDev ? "[Dev Takaro] " : "[Takaro] ";
+        return "[Takaro] ";
     }
 
     private void sendIdentify() {
@@ -124,9 +123,9 @@ public class TakaroWebSocket extends WebSocketClient {
         identify.put("type", "identify");
 
         Map<String, String> payload = new HashMap<>();
-        // Use dev credentials if this is dev connection
-        String identityToken = isDev ? config.getDevIdentityToken() : config.getIdentityToken();
-        String registrationToken = isDev ? config.getDevRegistrationToken() : config.getRegistrationToken();
+        ConnectionTarget target = config.getConnectionTarget();
+        String identityToken = target.identityToken();
+        String registrationToken = target.registrationToken();
 
         payload.put("identityToken", identityToken);
         if (!registrationToken.isEmpty()) {
