@@ -11,16 +11,57 @@ public final class Catalog {
     private Catalog() {
     }
 
+    /** Code segments that mark an asset as developer scaffolding or an abstract parent. */
+    private static final java.util.Set<String> DEVELOPER_TOKENS = java.util.Set.of("debug", "test", "dev", "template");
+
     /**
-     * True for codes that are developer scaffolding rather than real game content, e.g.
-     * {@code Debug_Donut_Selector}, {@code Test_Block}, {@code Dev_Marker} (F10).
+     * True for codes that are developer scaffolding or abstract parents rather than real game
+     * content, e.g. {@code Debug_Donut_Selector}, {@code Test_Block}, {@code Dev_Marker} (F10),
+     * and, anywhere in the code, {@code Glass_Test_Red}, {@code Weapon_Test_Zoom_Rifle},
+     * {@code Template_Weapon_Sword}, {@code Potion_Template} (0.7.7 ships 37 of these).
+     *
+     * <p>Only a whole {@code _}/{@code -} separated segment counts, so a real item that merely
+     * contains the word ({@code Tool_Debugger}, {@code Device_Panel}) stays in.
      */
     public static boolean isDeveloperAsset(String code) {
         if (code == null) {
             return false;
         }
-        String lower = code.toLowerCase(Locale.ROOT);
-        return lower.startsWith("debug_") || lower.startsWith("test_") || lower.startsWith("dev_");
+        for (String segment : code.toLowerCase(Locale.ROOT).split("[_\\-]+")) {
+            if (DEVELOPER_TOKENS.contains(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The shorter role ids an NPC variant can be named after, longest first:
+     * {@code Skeleton_Sand_Mage_Patrol} gives {@code Skeleton_Sand_Mage}, {@code Skeleton_Sand},
+     * {@code Skeleton}. Hytale translates the base creature but not most behaviour variants.
+     */
+    public static java.util.List<String> roleBaseCandidates(String code) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (code == null) {
+            return out;
+        }
+        String current = code;
+        int cut;
+        while ((cut = current.lastIndexOf('_')) > 0) {
+            current = current.substring(0, cut);
+            out.add(current);
+        }
+        return out;
+    }
+
+    /**
+     * The display name of a variant: the base creature's translated name plus the variant part
+     * of the id, e.g. {@code ("Sandswept Skeleton Mage", "Skeleton_Sand_Mage", "Skeleton_Sand_Mage_Patrol")}
+     * gives {@code "Sandswept Skeleton Mage (Patrol)"}.
+     */
+    public static String variantName(String baseName, String baseCode, String code) {
+        String rest = code.substring(baseCode.length()).replaceFirst("^[_\\-]+", "");
+        return rest.isEmpty() ? baseName : baseName + " (" + humanise(rest) + ")";
     }
 
     /**

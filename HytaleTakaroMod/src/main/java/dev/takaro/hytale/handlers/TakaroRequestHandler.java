@@ -2672,6 +2672,7 @@ public class TakaroRequestHandler {
             List<Map<String, Object>> entities = new ArrayList<>();
             int skipped = 0;
             int humanised = 0;
+            int variants = 0;
 
             for (String roleName : npc.getRoleTemplateNames(true)) {
                 if (roleName == null || roleName.isEmpty()) {
@@ -2715,6 +2716,18 @@ public class TakaroRequestHandler {
                 }
 
                 if (displayName == null || displayName.isEmpty()) {
+                    // Most behaviour variants (Skeleton_Sand_Mage_Patrol) have no translation of
+                    // their own, but their base creature does: use the game's name for it.
+                    for (String base : dev.takaro.hytale.util.Catalog.roleBaseCandidates(roleName)) {
+                        String baseName = translateRoleName(base);
+                        if (baseName != null) {
+                            displayName = dev.takaro.hytale.util.Catalog.variantName(baseName, base, roleName);
+                            variants++;
+                            break;
+                        }
+                    }
+                }
+                if (displayName == null || displayName.isEmpty()) {
                     displayName = dev.takaro.hytale.util.Catalog.humanise(roleName);
                     humanised++;
                 }
@@ -2733,6 +2746,7 @@ public class TakaroRequestHandler {
 
             plugin.getLogger().at(java.util.logging.Level.INFO).log("listEntities: " + entities.size()
                 + " spawnable role(s), " + skipped + " developer/placeholder entries filtered, "
+                + variants + " named after their translated base creature, "
                 + humanised + " without a translated name (humanised role id)");
             return entities;
         } catch (Exception e) {
