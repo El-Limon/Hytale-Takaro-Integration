@@ -19,7 +19,7 @@ a real client. Treat the table as "implemented, not yet proven".
 
 | Capability | Status | Notes |
 |---|---|---|
-| Connect / identify with Takaro | ⚠️ needs live test | WebSocket to `wss://connect.takaro.io/` |
+| Connect / identify with Takaro | ⚠️ needs live test | One WebSocket, to `wss://connect.takaro.io/` unless `TAKARO_WS_URL` is set |
 | Reconnect + re-identify after an outage | ⚠️ needs live test | Exponential backoff; config re-read before each attempt |
 | `testReachability` | ⚠️ needs live test | Proven honest in the stock hard test (a stopped server reports unreachable) |
 | `getPlayers` | ⚠️ needs live test | Name, gameId, platformId, IP |
@@ -28,6 +28,7 @@ a real client. Treat the table as "implemented, not yet proven".
 | `getServerInfo` | ⚠️ needs live test | Real MOTD, real Hytale version, player counts |
 | `getPlayerLocation` | ⚠️ needs live test | Failures return an error, not `0,0,0` |
 | `getPlayerInventory` | ⚠️ needs live test | All six inventory sections; failures return an error, not `[]` |
+| Player levels and skills | ❌ | Hytale has no per-player level, experience or skills; Memories progress belongs to the whole world. |
 | `getPlayerBedLocation` | ⚠️ needs live test | Respawn points, read reflectively |
 | `giveItem` | ⚠️ needs live test | Honours `amount`; `quality` is echoed back as `qualityIgnored` (see limits) |
 | `teleportPlayer` / `teleportPlayerToPlayer` | ⚠️ needs live test | Rejects missing/non-numeric coordinates |
@@ -88,6 +89,7 @@ Written to `mods/HytaleTakaroMod/TakaroConfig.properties`.
 |---|---|---|
 | `IDENTITY_TOKEN` | `MyHytaleServer` | The name this server identifies as |
 | `REGISTRATION_TOKEN` | *(empty)* | From Takaro: Settings → Game Servers → Add Server → Generic |
+| `TAKARO_WS_URL` | *(empty: `wss://connect.takaro.io/`)* | Connect to a different Takaro instead of the public one. The plugin keeps exactly one Takaro connection |
 | `COMMAND_PREFIX` | `!` | Prefix for Takaro chat commands (do not use `/`) |
 | `COMMAND_RESPONSE` | `[cyan]Command[-] [green]{prefix}{command}[-]` | Private confirmation sent when a command is seen |
 | `TAKARO_DEBUG` | `false` | Log every WebSocket frame (direction, type, requestId, action, and the player identity fields it carries) at INFO |
@@ -103,8 +105,9 @@ Written to `mods/HytaleTakaroMod/TakaroConfig.properties`.
 
 Everything under `HYTALECHARTS_*` is off by default and sends nothing anywhere unless a secret is set.
 
-`DEV_ENABLED` / `DEV_IDENTITY_TOKEN` / `DEV_REGISTRATION_TOKEN` / `DEV_WS_URL` point the plugin at a
-development Takaro instance. **Do not enable these on a production server.**
+`DEV_ENABLED` / `DEV_IDENTITY_TOKEN` / `DEV_REGISTRATION_TOKEN` / `DEV_WS_URL` are the older way to point the
+plugin at a development Takaro instance. They are read only when `TAKARO_WS_URL` is not set, and they
+replace the public connection instead of adding a second one. **Do not enable these on a production server.**
 
 ## Takaro console
 

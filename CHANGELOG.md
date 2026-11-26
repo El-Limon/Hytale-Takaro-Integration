@@ -4,6 +4,21 @@ All notable features added to the Hytale-Takaro Integration Mod.
 
 ---
 
+## 1.14.6-elimon.17
+
+### Fixes
+- The plugin opened two Takaro connections when `DEV_ENABLED=true`: one to the hardcoded
+  `wss://connect.takaro.io/` and one to `DEV_WS_URL`. A server pointed at another Takaro also
+  identified on the public one with whatever `IDENTITY_TOKEN` was set. It now opens exactly one
+  connection.
+- The development connection never received `chat-message` or `log` events. With one connection,
+  every event goes to the Takaro the server is configured for.
+
+### Configuration
+- New `TAKARO_WS_URL`: the Takaro to connect to. Empty means `wss://connect.takaro.io/`.
+- `DEV_ENABLED` with `DEV_WS_URL`, `DEV_IDENTITY_TOKEN` and `DEV_REGISTRATION_TOKEN` still works when
+  `TAKARO_WS_URL` is not set, and is now the only connection.
+
 ## 1.14.6-elimon.14
 
 ### Diagnostics

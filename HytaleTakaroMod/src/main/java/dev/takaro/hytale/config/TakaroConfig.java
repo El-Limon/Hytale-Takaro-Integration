@@ -119,19 +119,24 @@ public class TakaroConfig {
                 writer.write("HYTALECHARTS_PROMO_MESSAGE=Vote for our server on HytaleCharts!\n");
                 writer.write("HYTALECHARTS_PROMO_URL=https://hytalecharts.com\n");
                 writer.write("\n");
-                writer.write("# Optional: Dev Takaro Configuration (for developers only):\n");
-                writer.write("# DEV_ENABLED=true\n");
-                writer.write("# DEV_IDENTITY_TOKEN=MyHytaleServerDev\n");
-                writer.write("# DEV_REGISTRATION_TOKEN=your-dev-registration-token\n");
+                writer.write("# Optional: connect to a different Takaro instead of the public one.\n");
+                writer.write("# The server keeps exactly one Takaro connection; this replaces the default URL.\n");
+                writer.write("# TAKARO_WS_URL=wss://your-takaro-host/\n");
+                writer.write("# Older setting, still read when TAKARO_WS_URL is not set: DEV_ENABLED=true with\n");
+                writer.write("# DEV_WS_URL, DEV_IDENTITY_TOKEN and DEV_REGISTRATION_TOKEN.\n");
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
+    /** The single Takaro endpoint and tokens to use; see {@link ConnectionTarget}. */
+    public synchronized ConnectionTarget getConnectionTarget() {
+        return ConnectionTarget.resolve(properties::getProperty);
+    }
+
     public String getWsUrl() {
-        // Hardcoded - users don't configure this
-        return "wss://connect.takaro.io/";
+        return getConnectionTarget().url();
     }
 
     public String getIdentityToken() {
@@ -151,22 +156,6 @@ public class TakaroConfig {
         return properties.getProperty("HYTALE_API_TOKEN", "");
     }
 
-    // Dev Takaro connection (optional)
-    public boolean isDevEnabled() {
-        return Boolean.parseBoolean(properties.getProperty("DEV_ENABLED", "false"));
-    }
-
-    public String getDevWsUrl() {
-        return properties.getProperty("DEV_WS_URL", "wss://connect.next.takaro.dev/");
-    }
-
-    public String getDevIdentityToken() {
-        return properties.getProperty("DEV_IDENTITY_TOKEN", "");
-    }
-
-    public String getDevRegistrationToken() {
-        return properties.getProperty("DEV_REGISTRATION_TOKEN", "");
-    }
 
     /** How many game events to hold while the connection is down (F13). */
     public int getEventQueueSize() {
