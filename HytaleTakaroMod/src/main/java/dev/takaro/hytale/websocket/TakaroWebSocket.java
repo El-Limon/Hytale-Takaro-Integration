@@ -32,6 +32,19 @@ public class TakaroWebSocket extends WebSocketClient {
 
     /** Events produced while the connection is down or not yet identified (F13). */
     private final BoundedEventQueue<Map<String, Object>> pendingEvents;
+    /** Log events waiting for a pacer token; see {@link dev.takaro.hytale.util.LogPacer}. */
+    private final BoundedEventQueue<Map<String, Object>> pacedLogs = new BoundedEventQueue<>(PACED_LOG_CAPACITY);
+    private final dev.takaro.hytale.util.LogPacer logPacer =
+        new dev.takaro.hytale.util.LogPacer(LOG_EVENTS_PER_SECOND, LOG_EVENT_BURST, System.currentTimeMillis());
+    private static final double LOG_EVENTS_PER_SECOND = 12.0;
+    private static final int LOG_EVENT_BURST = 30;
+    private static final int PACED_LOG_CAPACITY = 2000;
+    private final java.util.concurrent.ScheduledExecutorService logDrain =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "Takaro-LogPacer");
+            t.setDaemon(true);
+            return t;
+        });
     private volatile boolean shuttingDown = false;
     private long lastDropLogAt = 0L;
     private static final long DROP_LOG_INTERVAL_MS = 30_000L;
@@ -42,6 +55,7 @@ public class TakaroWebSocket extends WebSocketClient {
         this.config = config;
         this.gson = new Gson();
         this.pendingEvents = new BoundedEventQueue<>(config.getEventQueueSize());
+        logDrain.scheduleAtFixedRate(this::drainPacedLogs, 250, 250, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -256,7 +270,47 @@ public class TakaroWebSocket extends WebSocketClient {
             return;
         }
 
-        sendToTakaro(event);
+        sendLive(event);
+    }
+
+    /** Send an event on an identified socket; log events go through the pacer. */
+    private void sendLive(Map<String, Object> event) {
+        if (!"log".equals(eventTypeOf(event))) {
+            sendToTakaro(event);
+            return;
+        }
+        synchronized (pacedLogs) {
+            if (pacedLogs.isEmpty() && logPacer.tryAcquire(System.currentTimeMillis())) {
+                sendToTakaro(event);
+                return;
+            }
+            if (!pacedLogs.offer(event)) {
+                long now = System.currentTimeMillis();
+                if (now - lastDropLogAt > DROP_LOG_INTERVAL_MS) {
+                    lastDropLogAt = now;
+                    plugin.getLogger().at(java.util.logging.Level.WARNING).log(getLogPrefix()
+                        + "Log backlog full (" + pacedLogs.capacity() + "), dropping oldest log events - "
+                        + pacedLogs.droppedCount() + " dropped in total since startup");
+                }
+            }
+        }
+    }
+
+    /** Send waiting log events as pacer tokens come in. */
+    private void drainPacedLogs() {
+        try {
+            synchronized (pacedLogs) {
+                while (!pacedLogs.isEmpty() && isIdentified && isOpen()
+                        && logPacer.tryAcquire(System.currentTimeMillis())) {
+                    java.util.List<Map<String, Object>> one = pacedLogs.drainUpTo(1);
+                    for (Map<String, Object> event : one) {
+                        sendToTakaro(event);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Never let the drain thread die; the next tick retries.
+        }
     }
 
     /** Send everything that was parked while the connection was unusable. */
@@ -274,7 +328,7 @@ public class TakaroWebSocket extends WebSocketClient {
                 pendingEvents.offer(event);
                 continue;
             }
-            sendToTakaro(event);
+            sendLive(event);
         }
     }
 
@@ -336,6 +390,7 @@ public class TakaroWebSocket extends WebSocketClient {
     public void shutdown() {
         shuttingDown = true;
         scheduler.shutdownNow();
+        logDrain.shutdownNow();
         pendingEvents.clear();
         close();
     }
