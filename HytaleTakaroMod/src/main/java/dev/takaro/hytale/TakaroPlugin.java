@@ -38,7 +38,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class TakaroPlugin extends JavaPlugin {
-    private static final String VERSION = "1.14.6-elimon.18";
+    private static final String VERSION = "1.14.6-elimon.21";
     private static final String HYTALECHARTS_API_URL = "https://hytalecharts.com/api/heartbeat";
     private static final int HEARTBEAT_INTERVAL_SECONDS = 300; // 5 minutes
 
@@ -504,6 +504,13 @@ public class TakaroPlugin extends JavaPlugin {
         try {
             requestExecutor.execute(() -> requestHandler.handleRequest(sourceWebSocket, requestId, action, payload));
         } catch (java.util.concurrent.RejectedExecutionException e) {
+            if (requestExecutor.isShutdown()) {
+                // The plugin is shutting down with the server: the pool is closed on purpose and
+                // the world is stopping, so do not run the request inline or report it as saturated.
+                getLogger().at(java.util.logging.Level.INFO).log(
+                    "Shutting down, not handling '" + action + "' (requestId " + requestId + ")");
+                return;
+            }
             getLogger().at(java.util.logging.Level.SEVERE).log(
                 "Request executor is saturated, running '" + action + "' inline: " + e.getMessage());
             requestHandler.handleRequest(sourceWebSocket, requestId, action, payload);

@@ -863,11 +863,28 @@ public class TakaroRequestHandler {
                 return result;
             }
 
-            playerRef.getPacketHandler().disconnect(Message.raw(reason));
+            // Disconnect on the player's world thread, as the game's own /kick does. Called from
+            // the request executor, the connection closed before the disconnect packet reached the
+            // client, which then showed "Lost connection to the server." instead of the reason.
+            Ref<EntityStore> kickRef = playerRef.getReference();
+            if (kickRef != null && kickRef.isValid()) {
+                World kickWorld = kickRef.getStore().getExternalData().getWorld();
+                CompletableFuture<Void> kicked = new CompletableFuture<>();
+                kickWorld.execute(() -> {
+                    try {
+                        playerRef.getPacketHandler().disconnect(Message.raw(reason));
+                    } finally {
+                        kicked.complete(null);
+                    }
+                });
+                kicked.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } else {
+                playerRef.getPacketHandler().disconnect(Message.raw(reason));
+            }
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            plugin.getLogger().at(java.util.logging.Level.INFO).log("Player kicked: " + gameId);
+            plugin.getLogger().at(java.util.logging.Level.INFO).log("Player kicked: " + gameId + " reason='" + reason + "'");
             return result;
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error kicking player: " + e.getMessage());
@@ -2630,35 +2647,6 @@ public class TakaroRequestHandler {
      * {@code NPCPlugin.getRoleTemplateNames(true)} returns the SPAWNABLE templates only, which
      * is what keeps abstract base templates out of the list.
      */
-    /**
-     * The player-facing name of an NPC role, from Hytale's own translation table (F18).
-     *
-     * <p>{@code Message.translation(key)} rendered to plain text resolves through
-     * {@code I18nModule}; when the key is unknown the renderer falls back to echoing the key
-     * itself, which is how a missing translation is detected here (returns {@code null} so the
-     * caller can try the builder and then a humanised role id).
-     *
-     * @return the display name, or {@code null} when the game has no translation for this role
-     */
-    private String translateRoleName(String roleName) {
-        for (String key : dev.takaro.hytale.util.Catalog.roleNameKeys(roleName)) {
-            try {
-                String translated = com.hypixel.hytale.server.core.util.MessageUtil.formatMessageToPlainString(
-                    com.hypixel.hytale.server.core.Message.translation(key).getFormattedMessage());
-                if (translated == null) {
-                    continue;
-                }
-                translated = translated.trim();
-                if (translated.isEmpty() || translated.equals(key)) {
-                    continue;
-                }
-                return translated;
-            } catch (Exception e) {
-                // Try the next key form.
-            }
-        }
-        return null;
-    }
 
     private Object handleListEntities() {
         try {
@@ -2691,44 +2679,14 @@ public class TakaroRequestHandler {
 
                 // F18: the player-facing name lives in Hytale's own i18n table as
                 // npcRoles.<Role>.name (574 entries in server.lang), NOT in
-                // BuilderRole.getDisplayNames(). Translation first, builder second, and only
-                // then a humanised form of the id.
-                String displayName = translateRoleName(roleName);
-                String description = null;
-                try {
-                    com.hypixel.hytale.server.npc.asset.builder.BuilderInfo info =
-                        npc.getRoleBuilderInfo(npc.getIndex(roleName));
-                    if (info != null && info.getBuilder() instanceof com.hypixel.hytale.server.npc.role.builders.BuilderRole) {
-                        com.hypixel.hytale.server.npc.role.builders.BuilderRole role =
-                            (com.hypixel.hytale.server.npc.role.builders.BuilderRole) info.getBuilder();
-                        String[] names = role.getDisplayNames();
-                        if (displayName == null
-                            && names != null && names.length > 0 && names[0] != null && !names[0].isEmpty()) {
-                            displayName = names[0];
-                        }
-                        String shortDescription = role.getShortDescription();
-                        if (shortDescription != null && !shortDescription.isEmpty()) {
-                            description = shortDescription;
-                        }
-                    }
-                } catch (Exception e) {
-                    // Keep the role id as the name rather than dropping the entry.
-                }
-
-                if (displayName == null || displayName.isEmpty()) {
-                    // Most behaviour variants (Skeleton_Sand_Mage_Patrol) have no translation of
-                    // their own, but their base creature does: use the game's name for it.
-                    for (String base : dev.takaro.hytale.util.Catalog.roleBaseCandidates(roleName)) {
-                        String baseName = translateRoleName(base);
-                        if (baseName != null) {
-                            displayName = dev.takaro.hytale.util.Catalog.variantName(baseName, base, roleName);
-                            variants++;
-                            break;
-                        }
-                    }
-                }
-                if (displayName == null || displayName.isEmpty()) {
-                    displayName = dev.takaro.hytale.util.Catalog.humanise(roleName);
+                // BuilderRole.getDisplayNames(). RoleNames: translation first, builder second,
+                // base creature for variants, and only then a humanised form of the id.
+                dev.takaro.hytale.util.RoleNames.Resolved resolved = dev.takaro.hytale.util.RoleNames.resolve(roleName);
+                String displayName = resolved.name();
+                String description = resolved.description();
+                if (resolved.source() == dev.takaro.hytale.util.RoleNames.Source.VARIANT) {
+                    variants++;
+                } else if (resolved.source() == dev.takaro.hytale.util.RoleNames.Source.HUMANISED) {
                     humanised++;
                 }
 
