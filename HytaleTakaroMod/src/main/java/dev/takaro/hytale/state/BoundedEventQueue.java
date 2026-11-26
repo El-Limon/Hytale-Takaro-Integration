@@ -48,6 +48,15 @@ public class BoundedEventQueue<T> {
         return fitted;
     }
 
+    /** Take at most {@code max} events from the head of the queue. */
+    public synchronized List<T> drainUpTo(int max) {
+        List<T> out = new ArrayList<>(Math.min(max, queue.size()));
+        while (out.size() < max && !queue.isEmpty()) {
+            out.add(queue.removeFirst());
+        }
+        return out;
+    }
+
     /** Take everything currently queued, leaving the queue empty. */
     public synchronized List<T> drain() {
         List<T> out = new ArrayList<>(queue);
