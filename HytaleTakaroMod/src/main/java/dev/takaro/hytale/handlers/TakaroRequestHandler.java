@@ -957,8 +957,29 @@ public class TakaroRequestHandler {
                 return result;
             }
 
-            Ban ban = new Ban(target, ConsoleSender.INSTANCE.getUuid(), Instant.now(), expiresOn, reason);
-            access.ban(ban);
+            Instant gameExpiry = Bans.gameExpiry(expiresOn, Instant.now());
+            Ban ban = new Ban(target, ConsoleSender.INSTANCE.getUuid(), Instant.now(), gameExpiry, reason);
+            // An online target is disconnected first, on their world thread as the game's /ban
+            // does, with a plain-text reason: the 0.7.7 client cannot display the game's own
+            // timed-ban message and shows "Lost connection to the server." instead. Stored
+            // afterwards, the ban finds the player already gone and refuses every rejoin.
+            PlayerRef online = onlinePlayer(target);
+            World banWorld = onlinePlayerWorld(online);
+            if (banWorld != null) {
+                String text = Bans.disconnectText(reason, gameExpiry);
+                CompletableFuture<Void> banned = new CompletableFuture<>();
+                banWorld.execute(() -> {
+                    try {
+                        online.getPacketHandler().disconnect(Message.raw(text));
+                        access.ban(ban);
+                    } finally {
+                        banned.complete(null);
+                    }
+                });
+                banned.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } else {
+                access.ban(ban);
+            }
 
             // Read the state back before answering.
             boolean stored = access.isBanned(target);
@@ -967,7 +988,8 @@ public class TakaroRequestHandler {
                 result.put("error", "Hytale did not store the ban (expiry already in the past?)");
             }
             plugin.getLogger().at(java.util.logging.Level.INFO).log(
-                "banPlayer " + gameId + " reason='" + reason + "' expiresAt=" + expiresOn + " stored=" + stored);
+                "banPlayer " + gameId + " reason='" + reason + "' expiresAt=" + expiresOn
+                    + (gameExpiry == null && expiresOn != null ? " (stored as permanent)" : "") + " stored=" + stored);
             return result;
         } catch (Exception e) {
             plugin.getLogger().at(java.util.logging.Level.SEVERE).log("Error banning player: " + e.getMessage());
@@ -976,6 +998,27 @@ public class TakaroRequestHandler {
             result.put("error", e.getMessage());
             return result;
         }
+    }
+
+    /** The online player with this UUID, or null. */
+    private PlayerRef onlinePlayer(UUID uuid) {
+        com.hypixel.hytale.server.core.universe.Universe universe =
+            com.hypixel.hytale.server.core.universe.Universe.get();
+        if (universe == null) {
+            return null;
+        }
+        return universe.getPlayers().stream()
+            .filter(p -> p.getUuid().equals(uuid))
+            .findFirst()
+            .orElse(null);
+    }
+
+    /** The world an online player is in, or null when they are offline or not in a world. */
+    private World onlinePlayerWorld(PlayerRef ref) {
+        if (ref == null || ref.getReference() == null || !ref.getReference().isValid()) {
+            return null;
+        }
+        return ref.getReference().getStore().getExternalData().getWorld();
     }
 
     /** Remove a ban, then verify it is really gone before reporting success. */
